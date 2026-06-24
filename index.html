@@ -87,6 +87,11 @@ body{font-size:14px;line-height:1.5}
 
 /* ── HERO KPIs ── */
 .hero{display:grid;grid-template-columns:repeat(5,1fr);gap:0;border-radius:12px;overflow:hidden;border:1px solid var(--line);margin-bottom:40px;box-shadow:0 2px 8px rgba(26,35,126,.06)}
+.hero-pm{margin-bottom:14px}
+.hero .stat.headline-blue{background:var(--ss-sky);color:var(--ss-navy)}
+.hero .stat.headline-blue .lbl{color:var(--accent)}
+.hero .stat.headline-blue .val{color:var(--ss-navy)}
+.hero .stat.headline-blue .sub{color:var(--ink-3)}
 .hero .stat{padding:24px 20px;border-right:1px solid var(--line);background:#fff;position:relative;cursor:default;transition:background .15s}
 .hero .stat:last-child{border-right:0}
 .hero .stat:hover{background:var(--ss-sky)}
@@ -414,25 +419,59 @@ function renderOverview() {
   ];
   const totalCost = T.totalCost || costParts.reduce((s, p) => s + (T[p.key]||0), 0);
 
+  // Headcount sums from VAV columns
+  const pmAssureSH = DATA.clusters.reduce((s,c) => s + (c.forPM||0) + (c.forAssure||0), 0);
+  const cmPmAssureSH = DATA.clusters.reduce((s,c) => s + (c.b2cCM||0) + (c.b2cPM||0) + (c.assure||0), 0);
+  const torqueTotal = DATA.clusters.reduce((s,c) => s + (c.torquePM||0) + (c.torqueCM||0), 0);
+  const pmTmAdj = T.pmTmAdj || DATA.clusters.reduce((s,c) => s + (c.pmTmAdj||0), 0);
+
   const html = `
-    <div class="hero">
+    <div class="hero hero-pm">
       <div class="stat headline">
         <div class="lbl">CPV — PM (headline)</div>
         <div class="val"><span class="cur">₹</span>${inr(T.cpvPM)}</div>
         <div class="sub"><span>Cost PM ÷ PM+TM visits</span></div>
       </div>
       <div class="stat">
+        <div class="lbl">PM + Assure SH count</div>
+        <div class="val">${inr(pmAssureSH)}</div>
+        <div class="sub"><span><b>${inr(DATA.clusters.reduce((s,c)=>s+(c.forPM||0),0))}</b> PM</span><span><b>${inr(DATA.clusters.reduce((s,c)=>s+(c.forAssure||0),0))}</b> Assure</span></div>
+      </div>
+      <div class="stat">
+        <div class="lbl">Total Visits (Adj) PM+TM</div>
+        <div class="val">${inr(Math.round(pmTmAdj))}</div>
+        <div class="sub"><span><b>${inr(T.pmDone)}</b> PM</span><span><b>${inr(torqueTotal)}</b> Torque</span></div>
+      </div>
+      <div class="stat">
+        <div class="lbl">Cost PM (₹)</div>
+        <div class="val"><span class="cur">₹</span>${inrShort(T.costPM||0)}</div>
+        <div class="sub"><span>PM-attributable cost only</span></div>
+      </div>
+      <div class="stat">
+        <div class="lbl">Productivity (V/Day) PM</div>
+        <div class="val">${(T.vDayPM||0).toFixed(1)}<span class="unit">visits</span></div>
+        <div class="sub"><span>PM visits per PM man-day</span></div>
+      </div>
+    </div>
+
+    <div class="hero hero-blended">
+      <div class="stat headline-blue">
         <div class="lbl">CPV — Blended</div>
         <div class="val"><span class="cur">₹</span>${inr(T.cpvBlended)}</div>
         <div class="sub"><span>Total Cost ÷ adj. visits</span></div>
       </div>
       <div class="stat">
-        <div class="lbl">TM+PM+CM+Assure Total Visits MTD</div>
-        <div class="val">${inr(T.totalVisits)}</div>
-        <div class="sub"><span><b>${inr(T.pmDone)}</b> PM</span><span><b>${inr(T.maas||0)}</b> MAAS</span><span><b>${inr(T.cm)}</b> CM</span><span><b>${inr(DATA.clusters.reduce((s,c)=>(s+(c.torquePM||0)+(c.torqueCM||0)),0))}</b> Torque</span></div>
+        <div class="lbl">CM + PM + Assure SH count</div>
+        <div class="val">${inr(cmPmAssureSH)}</div>
+        <div class="sub"><span><b>${inr(DATA.clusters.reduce((s,c)=>s+(c.b2cPM||0),0))}</b> PM</span><span><b>${inr(DATA.clusters.reduce((s,c)=>s+(c.b2cCM||0),0))}</b> CM</span><span><b>${inr(DATA.clusters.reduce((s,c)=>s+(c.assure||0),0))}</b> Assure</span></div>
       </div>
       <div class="stat">
-        <div class="lbl">Total Cost B2C Cost Adj. Visits</div>
+        <div class="lbl">TM+PM+CM+Assure Total Visits MTD</div>
+        <div class="val">${inr(T.totalVisits)}</div>
+        <div class="sub"><span><b>${inr(T.pmDone)}</b> PM</span><span><b>${inr(T.maas||0)}</b> MAAS</span><span><b>${inr(T.cm)}</b> CM</span><span><b>${inr(torqueTotal)}</b> Torque</span></div>
+      </div>
+      <div class="stat">
+        <div class="lbl">Total Cost · B2C Cost Adj. Visits</div>
         <div class="val"><span class="cur">₹</span>${inrShort(totalCost)}</div>
         <div class="sub"><span><b>${T.activeSH}</b> active SHs</span></div>
       </div>
