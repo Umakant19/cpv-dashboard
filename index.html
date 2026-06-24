@@ -859,6 +859,34 @@ function renderTblBody() {
     </tr>`;
   }).join("");
 
+  // ── Totals row ────────────────────────────────────────────────────────
+  const sum = k => filtered.reduce((s,c) => s + (c[k]||0), 0);
+  const tCost = sum('totalCost'), tCostPM = sum('costPM');
+  const tPmTm = sum('pmTmAdj'), tTvAdj = sum('tvAdj');
+  const tManDays = sum('manDays'), tPmManDays = sum('pmManDays'), tPmDone = sum('pmDone');
+  const cpvPM = tPmTm ? Math.round(tCostPM / tPmTm) : 0;
+  const cpvBld = tTvAdj ? Math.round(tCost / tTvAdj) : 0;
+  const vdayPM = tPmManDays ? (tPmDone / tPmManDays) : 0;
+  const vdayBld = tManDays ? (sum('totalVisits') / tManDays) : 0;
+
+  tbody.innerHTML += `<tr style="border-top:2px solid var(--ink-3);font-weight:700;background:var(--bg-2)">
+    <td>TOTAL (${filtered.length})</td>
+    <td>${inr(sum('activeShB2C'))}</td>
+    <td>${inr(sum('totalVisits'))}</td>
+    <td>${inr(sum('pmDone'))}</td>
+    <td>${inr(sum('cm'))}</td>
+    <td>₹${inrShort(sum('salaryCost'))}</td>
+    <td>₹${inrShort(sum('reimbCost'))}</td>
+    <td>₹${inrShort(sum('toolkitCost'))}</td>
+    <td>₹${inrShort(sum('schedulerCost'))}</td>
+    <td>₹${inrShort(sum('bikeCost'))}</td>
+    <td>₹${inr(tCost)}</td>
+    <td>${vdayPM.toFixed(2)}</td>
+    <td>${vdayBld.toFixed(2)}</td>
+    <td>₹${inr(cpvPM)}</td>
+    <td>₹${inr(cpvBld)}</td>
+  </tr>`;
+
   document.querySelectorAll("thead th").forEach(th => {
     th.classList.toggle("sorted", th.dataset.k === tblState.sort);
     th.classList.toggle("asc", th.dataset.k === tblState.sort && tblState.asc);
