@@ -281,6 +281,7 @@ tbody tr:last-child td{border-bottom:0}
         <button class="tab" data-tab="deepdive">Individual Deep Dive</button>
         <button class="tab" data-tab="cityiq">City Intelligence</button>
         <button class="tab" data-tab="clustersh">Cluster SH Costs</button>
+        <button class="tab" data-tab="pmadherence">PM Adherence</button>
       </div>
     </div>
     <div class="meta">
@@ -1676,14 +1677,17 @@ function redrawCityIQ() {
     // type mix
     const typeBreak = types.map(t=>({ t, v:ciWindowTotal(c,t,from,to) })).filter(x=>x.v>0);
 
-    // per-SH breakdown
+    // per-SH breakdown — enrich with team/category from shLevel
+    const shLevelMap = {};
+    (DATA.shLevel||[]).forEach(r=>{ if(!shLevelMap[r.empCode||r.name]) shLevelMap[r.empCode||r.name] = r; });
     const shRows = unified.filter(r=>r.cluster===st.selected).map(r=>{
       let v=0;
       Object.keys(r.typeDays||{}).forEach(t=>{
         if(st.type!=='All'&&t!==st.type) return;
         for(let i=from-1;i<to;i++) v+=(r.typeDays[t][i]||0);
       });
-      return { name:r.name, empCode:r.empCode, visits:v };
+      const meta = shLevelMap[r.empCode] || shLevelMap[r.name] || {};
+      return { name:r.name, empCode:r.empCode, visits:v, team:meta.team||'—', category:meta.category||'—', status:meta.status||'—' };
     }).filter(r=>r.visits>0).sort((a,b)=>b.visits-a.visits);
 
     const maxSH = shRows.length ? shRows[0].visits : 1;
@@ -1745,15 +1749,21 @@ function redrawCityIQ() {
     // SH performance bars
     const shBars = shRows.slice(0,20).map(r => {
       const w = Math.round(r.visits/maxSH*100);
-      const pct = total ? Math.round(r.visits/total*100) : 0;
-      return `<div style="display:flex;align-items:center;gap:10px;padding:5px 0;border-bottom:1px solid var(--line)">
-        <div style="width:130px;font-size:12px;font-weight:500;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${r.name}">${r.name}</div>
-        <div style="font-size:10px;color:var(--ink-4);font-family:'JetBrains Mono',monospace;width:72px">${r.empCode||'—'}</div>
-        <div style="flex:1;height:8px;background:var(--bg-2);border-radius:4px;overflow:hidden">
-          <div style="height:100%;width:${w}%;background:var(--ss-navy);border-radius:4px;transition:width .3s"></div>
+      const pctV = total ? Math.round(r.visits/total*100) : 0;
+      const teamColor = (r.team||'').toLowerCase()==='b2b'?'var(--b2b)':(r.team||'').toLowerCase()==='b2c'?'var(--good)':'var(--ink-3)';
+      return `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--line)">
+        <div style="width:120px;font-size:12px;font-weight:500;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${r.name}">${r.name}</div>
+        <div style="font-size:10px;color:var(--ink-4);font-family:'JetBrains Mono',monospace;width:60px">${r.empCode||'—'}</div>
+        <div style="width:52px">
+          <span style="font-size:10px;font-weight:600;color:${teamColor};padding:2px 6px;background:${(r.team||'').toLowerCase()==='b2b'?'var(--b2b-soft)':'var(--good-soft)'};border-radius:4px">${r.team||'—'}</span>
         </div>
-        <div style="font-size:12px;font-weight:700;color:var(--ink);width:32px;text-align:right">${r.visits}</div>
-        <div style="font-size:11px;color:var(--ink-3);width:30px;text-align:right">${pct}%</div>
+        <div style="width:48px;font-size:10px;color:var(--ink-4)">${r.category&&r.category!=='—'?r.category:'—'}</div>
+        <div style="width:40px;font-size:10px;color:var(--ink-4)">N/A</div>
+        <div style="flex:1;height:7px;background:var(--bg-2);border-radius:4px;overflow:hidden">
+          <div style="height:100%;width:${w}%;background:var(--ss-navy);border-radius:4px"></div>
+        </div>
+        <div style="font-size:12px;font-weight:700;color:var(--ink);width:28px;text-align:right">${r.visits}</div>
+        <div style="font-size:11px;color:var(--ink-3);width:28px;text-align:right">${pctV}%</div>
       </div>`;
     }).join('');
 
@@ -1780,8 +1790,18 @@ function redrawCityIQ() {
 
       <!-- SH breakdown -->
       ${shRows.length ? `<div class="card" style="padding:20px">
-        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.12em;color:var(--ink-3);margin-bottom:14px">
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.12em;color:var(--ink-3);margin-bottom:10px">
           SH breakdown · ${shRows.length} active · showing ${Math.min(shRows.length,20)}
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;padding:0 0 6px;border-bottom:1px solid var(--line);margin-bottom:4px">
+          <div style="width:120px;font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-4)">Name</div>
+          <div style="width:60px;font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-4)">EMP Code</div>
+          <div style="width:52px;font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-4)">Team</div>
+          <div style="width:48px;font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-4)">Type</div>
+          <div style="width:40px;font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-4)">DOJ</div>
+          <div style="flex:1;font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-4)">Visits</div>
+          <div style="width:28px;font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-4);text-align:right">#</div>
+          <div style="width:28px;font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-4);text-align:right">%</div>
         </div>
         ${shBars}
         ${shRows.length>20?`<div style="font-size:11px;color:var(--ink-3);margin-top:10px;text-align:center">${shRows.length-20} more SHs…</div>`:''}
@@ -1910,7 +1930,8 @@ function redrawClusterSH() {
     <th data-csh="name" style="text-align:left;padding:11px 14px;cursor:pointer">SH Name</th>
     <th data-csh="status" style="text-align:left;padding:11px 14px;cursor:pointer">Status</th>
     <th data-csh="team" style="text-align:left;padding:11px 14px;cursor:pointer">Team</th>
-    <th data-csh="category" style="text-align:left;padding:11px 14px;cursor:pointer">Cat</th>
+    <th data-csh="category" style="text-align:left;padding:11px 14px;cursor:pointer">Type</th>
+    <th style="text-align:left;padding:11px 14px">DOJ</th>
     <th data-csh="salary" style="text-align:right;padding:11px 14px;cursor:pointer">Salary</th>
     <th data-csh="toolkit" style="text-align:right;padding:11px 14px;cursor:pointer">Toolkit</th>
     <th data-csh="otherCost" style="text-align:right;padding:11px 14px;cursor:pointer">Other (20%)</th>
@@ -1935,6 +1956,7 @@ function redrawClusterSH() {
       <td style="text-align:left"><span style="color:${inactive?'var(--ink-3)':'var(--good)'};font-size:11px">${r.status||'—'}</span></td>
       <td style="text-align:left;font-size:11px"><span class="chip ${(r.team||'').toLowerCase()==='b2b'?'b2b':''}">${r.team||'—'}</span></td>
       <td style="text-align:left;color:var(--ink-3);font-size:11px">${r.category||'—'}</td>
+      <td style="text-align:left;color:var(--ink-4);font-size:11px">N/A</td>
       <td style="text-align:right">₹${inr(r.salary||0)}</td>
       <td style="text-align:right;color:var(--ink-3)">₹${inr(r.toolkit||0)}</td>
       <td style="text-align:right;color:var(--ink-3)">₹${inr(r.otherCost||0)}</td>
@@ -1982,7 +2004,414 @@ function redrawClusterSH() {
   });
 }
 
-const RENDER = { overview: renderOverview, quadrant: renderQuadrant, clusters: renderClusters, shdaily: renderSHDaily, deepdive: renderDeepDive, cityiq: renderCityIQ, clustersh: renderClusterSH };
+
+// ═════════════════════════════════════════════════════════════════════════════
+// PM ADHERENCE TAB
+// ═════════════════════════════════════════════════════════════════════════════
+let pmState = { selected: 'ALL' };  // 'ALL' or a cluster name
+
+function renderPMAdherence() {
+  const clusters = (DATA.clusters || []).filter(c => (c.pmDue||0) > 0 || (c.pmDone||0) > 0);
+  if (!clusters.length) {
+    document.getElementById('app').innerHTML = '<div class="section" style="margin-top:0"><p style="color:var(--ink-3);padding:40px">No PM data available.</p></div>';
+    return;
+  }
+
+  // ── Grand totals ──
+  const G = {
+    pmDue:       clusters.reduce((s,c)=>s+(c.pmDue||0),0),
+    pmDone:      clusters.reduce((s,c)=>s+(c.pmDone||0),0),
+    cm:          clusters.reduce((s,c)=>s+(c.cm||0),0),
+    activeSH:    clusters.reduce((s,c)=>s+(c.activeShB2C||c.activeSH||0),0),
+    forPM:       clusters.reduce((s,c)=>s+(c.forPM||0),0),
+    totalCost:   clusters.reduce((s,c)=>s+(c.totalCost||0),0),
+    costPM:      clusters.reduce((s,c)=>s+(c.costPM||0),0),
+    manDays:     clusters.reduce((s,c)=>s+(c.manDays||0),0),
+    pmManDays:   clusters.reduce((s,c)=>s+(c.pmManDays||0),0),
+    pmTmAdj:     clusters.reduce((s,c)=>s+(c.pmTmAdj||0),0),
+  };
+  G.pctDone   = G.pmDue > 0 ? (G.pmDone / G.pmDue * 100) : 0;
+  G.balance   = Math.max(0, G.pmDue - G.pmDone);
+  G.cpvPM     = G.pmTmAdj > 0 ? G.costPM / G.pmTmAdj : 0;
+  G.vDayPM    = G.pmManDays > 0 ? G.pmDone / G.pmManDays : 0;
+  // productive run rate = PM done / working SH days
+  G.runRate   = G.pmManDays > 0 ? G.pmDone / G.pmManDays : 0;
+  // tickets closing projection: at current run rate, days to close balance
+  G.daysInMonth = DATA.meta.daysInMonth || 30;
+  const elapsed = G.daysInMonth * 0.7; // approx days elapsed in month from context
+  G.daysLeft  = G.daysInMonth - elapsed;
+  G.projClose = G.runRate > 0 ? G.balance / G.runRate : null;  // SH-days needed
+
+  const html = `
+    <div class="section" style="margin-top:0">
+      <div class="eye">Field performance · ${DATA.meta.month||''}</div>
+      <h2>PM Adherence & Completion</h2>
+      <p class="lead">PM due vs done, balance, run rate, and projected close across all clusters. Click any cluster card to drill into its detail.</p>
+
+      <!-- Grand total hero strip -->
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:0;border-radius:12px;overflow:hidden;border:1px solid var(--line);margin-bottom:28px;box-shadow:0 2px 8px rgba(26,35,126,.07)">
+        <div style="padding:22px 24px;background:var(--ss-navy);border-right:1px solid rgba(255,255,255,.12)">
+          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.13em;color:var(--ss-amber);font-weight:700;margin-bottom:8px">PM Due (Total)</div>
+          <div style="font-size:32px;font-weight:800;color:#fff;letter-spacing:-.02em">${inr(Math.round(G.pmDue))}</div>
+          <div style="font-size:11px;color:rgba(255,255,255,.55);margin-top:6px">${clusters.length} clusters · ${inr(G.forPM)} dedicated SHs</div>
+        </div>
+        <div style="padding:22px 24px;background:#fff;border-right:1px solid var(--line)">
+          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.13em;color:var(--ink-3);font-weight:700;margin-bottom:8px">PM Done</div>
+          <div style="font-size:32px;font-weight:800;color:var(--good);letter-spacing:-.02em">${inr(G.pmDone)}</div>
+          <div style="font-size:11px;color:var(--ink-3);margin-top:6px"><b style="color:${G.pctDone>=85?'var(--good)':G.pctDone>=70?'var(--warn)':'var(--danger)'}">${G.pctDone.toFixed(1)}%</b> completion</div>
+        </div>
+        <div style="padding:22px 24px;background:#fff;border-right:1px solid var(--line)">
+          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.13em;color:var(--ink-3);font-weight:700;margin-bottom:8px">Balance Remaining</div>
+          <div style="font-size:32px;font-weight:800;color:${G.balance>0?'var(--danger)':'var(--good)'};letter-spacing:-.02em">${inr(Math.round(G.balance))}</div>
+          <div style="font-size:11px;color:var(--ink-3);margin-top:6px">tickets still open</div>
+        </div>
+        <div style="padding:22px 24px;background:#fff">
+          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.13em;color:var(--ink-3);font-weight:700;margin-bottom:8px">Productive Run Rate</div>
+          <div style="font-size:32px;font-weight:800;color:var(--ss-navy);letter-spacing:-.02em">${G.runRate.toFixed(1)}</div>
+          <div style="font-size:11px;color:var(--ink-3);margin-top:6px">PM visits / SH-day</div>
+        </div>
+      </div>
+
+      <!-- Secondary KPI tiles -->
+      <div class="grid-4" style="margin-bottom:28px">
+        <div class="cost-tile">
+          <div class="lbl">Active Service Heroes</div>
+          <div class="val">${inr(G.activeSH)}</div>
+          <div class="pct">${inr(G.forPM)} on PM duty</div>
+        </div>
+        <div class="cost-tile">
+          <div class="lbl">CPV — PM</div>
+          <div class="val"><span class="cur">₹</span>${inr(Math.round(G.cpvPM))}</div>
+          <div class="pct">Cost PM ÷ adj. visits</div>
+        </div>
+        <div class="cost-tile">
+          <div class="lbl">V/Day — PM</div>
+          <div class="val">${G.vDayPM.toFixed(2)}</div>
+          <div class="pct">PM done ÷ PM man-days</div>
+        </div>
+        <div class="cost-tile">
+          <div class="lbl">SH-days to close balance</div>
+          <div class="val" style="color:${G.projClose&&G.projClose<=G.daysLeft*G.forPM?'var(--good)':'var(--danger)'}">
+            ${G.projClose ? inr(Math.round(G.projClose)) : '—'}
+          </div>
+          <div class="pct">at current run rate</div>
+        </div>
+      </div>
+
+      <!-- Completion progress bar across all clusters -->
+      <div class="card" style="padding:20px 22px;margin-bottom:28px">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px">
+          <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--ink-3)">Overall PM completion</div>
+          <div style="font-size:13px;font-weight:700;color:${G.pctDone>=85?'var(--good)':G.pctDone>=70?'var(--warn)':'var(--danger)'}">${G.pctDone.toFixed(1)}% · ${inr(G.pmDone)} of ${inr(Math.round(G.pmDue))}</div>
+        </div>
+        <div style="height:16px;background:var(--bg-2);border-radius:8px;overflow:hidden;position:relative">
+          <div style="height:100%;width:${Math.min(100,G.pctDone).toFixed(1)}%;background:${G.pctDone>=85?'var(--good)':G.pctDone>=70?'var(--ss-amber)':'var(--danger)'};border-radius:8px;transition:width .4s"></div>
+        </div>
+        <div style="display:flex;justify-content:space-between;margin-top:6px;font-size:10px;color:var(--ink-4)">
+          <span>0</span><span style="color:var(--warn);font-weight:600">70% target</span><span style="color:var(--good);font-weight:600">85% good</span><span>${inr(Math.round(G.pmDue))}</span>
+        </div>
+      </div>
+
+      <!-- Cluster cards grid -->
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+        <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--ink-3)">${clusters.length} Clusters — click to drill in</div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <span style="font-size:11px;color:var(--ink-4)">Sort:</span>
+          ${['% done','balance','pmDue','runRate'].map(k=>
+            `<button class="pma-sort" data-k="${k}" style="padding:4px 12px;border:1px solid var(--line);border-radius:14px;background:#fff;color:var(--ink-3);font-size:11px;font-weight:600;cursor:pointer;font-family:inherit">${k==='% done'?'% Done':k==='balance'?'Balance':k==='pmDue'?'PM Due':'Run Rate'}</button>`
+          ).join('')}
+        </div>
+      </div>
+      <div id="pma-cards" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px"></div>
+
+    </div>
+  `;
+  document.getElementById('app').innerHTML = html;
+
+  let pmSortKey = '% done', pmSortAsc = true;
+
+  function renderPMACards() {
+    const sorted = [...clusters].sort((a,b) => {
+      const getV = (c) => {
+        if (pmSortKey==='% done')   return c.pmDue>0 ? c.pmDone/c.pmDue : 0;
+        if (pmSortKey==='balance')  return Math.max(0,(c.pmDue||0)-(c.pmDone||0));
+        if (pmSortKey==='pmDue')    return c.pmDue||0;
+        if (pmSortKey==='runRate')  return c.pmManDays>0 ? (c.pmDone||0)/c.pmManDays : 0;
+        return 0;
+      };
+      return pmSortAsc ? getV(a)-getV(b) : getV(b)-getV(a);
+    });
+
+    document.getElementById('pma-cards').innerHTML = sorted.map(c => {
+      const due     = c.pmDue || 0;
+      const done    = c.pmDone || 0;
+      const pct     = due > 0 ? done/due*100 : 0;
+      const bal     = Math.max(0, due - done);
+      const shs     = c.activeShB2C || c.activeSH || 0;
+      const forPM   = c.forPM || 0;
+      const rr      = c.pmManDays > 0 ? done / c.pmManDays : 0;
+      const cpvPM   = c.cpvPM || 0;
+      const vdayPM  = c.vDayPM || 0;
+      const cm      = c.cm || 0;
+      // projection: SH-days needed to finish at current rate
+      const projDays = rr > 0 ? (bal / rr / Math.max(forPM,1)).toFixed(1) : null;
+
+      const pctColor = pct>=85?'var(--good)':pct>=70?'var(--ss-amber)':'var(--danger)';
+      const barW     = Math.min(100, pct).toFixed(1);
+
+      return `<div class="pma-cluster-card" data-cluster="${c.cluster}"
+        style="background:#fff;border:1.5px solid var(--line);border-radius:12px;padding:18px 20px;cursor:pointer;transition:all .15s;box-shadow:0 1px 4px rgba(26,35,126,.05)">
+        <!-- header -->
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px">
+          <div>
+            <div style="font-size:15px;font-weight:800;color:var(--ss-navy)">${c.cluster}</div>
+            <div style="font-size:10.5px;color:var(--ink-3);margin-top:2px">${shs} SHs · ${forPM} on PM</div>
+          </div>
+          <div style="text-align:right">
+            <div style="font-size:20px;font-weight:800;color:${pctColor}">${pct.toFixed(1)}%</div>
+            <div style="font-size:10px;color:var(--ink-4)">completion</div>
+          </div>
+        </div>
+
+        <!-- progress bar -->
+        <div style="height:8px;background:var(--bg-2);border-radius:4px;overflow:hidden;margin-bottom:12px">
+          <div style="height:100%;width:${barW}%;background:${pctColor};border-radius:4px"></div>
+        </div>
+
+        <!-- 6-metric grid -->
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
+          <div style="background:var(--bg);border-radius:7px;padding:8px 10px">
+            <div style="font-size:8.5px;text-transform:uppercase;letter-spacing:.1em;color:var(--ink-4)">PM Due</div>
+            <div style="font-size:14px;font-weight:700;color:var(--ink)">${inr(Math.round(due))}</div>
+          </div>
+          <div style="background:var(--bg);border-radius:7px;padding:8px 10px">
+            <div style="font-size:8.5px;text-transform:uppercase;letter-spacing:.1em;color:var(--ink-4)">PM Done</div>
+            <div style="font-size:14px;font-weight:700;color:var(--good)">${inr(done)}</div>
+          </div>
+          <div style="background:var(--bg);border-radius:7px;padding:8px 10px">
+            <div style="font-size:8.5px;text-transform:uppercase;letter-spacing:.1em;color:var(--ink-4)">Balance</div>
+            <div style="font-size:14px;font-weight:700;color:${bal>0?'var(--danger)':'var(--good)'}">${inr(Math.round(bal))}</div>
+          </div>
+          <div style="background:var(--bg);border-radius:7px;padding:8px 10px">
+            <div style="font-size:8.5px;text-transform:uppercase;letter-spacing:.1em;color:var(--ink-4)">Run Rate</div>
+            <div style="font-size:14px;font-weight:700;color:var(--ss-navy)">${rr.toFixed(1)}</div>
+            <div style="font-size:9px;color:var(--ink-4)">PM/SH-day</div>
+          </div>
+          <div style="background:var(--bg);border-radius:7px;padding:8px 10px">
+            <div style="font-size:8.5px;text-transform:uppercase;letter-spacing:.1em;color:var(--ink-4)">CPV-PM</div>
+            <div style="font-size:14px;font-weight:700;color:var(--ss-navy)">${cpvPM>0?'₹'+inr(Math.round(cpvPM)):'—'}</div>
+          </div>
+          <div style="background:var(--bg);border-radius:7px;padding:8px 10px">
+            <div style="font-size:8.5px;text-transform:uppercase;letter-spacing:.1em;color:var(--ink-4)">V/Day PM</div>
+            <div style="font-size:14px;font-weight:700;color:var(--ss-navy)">${vdayPM.toFixed(2)}</div>
+          </div>
+        </div>
+
+        <!-- projection footer -->
+        <div style="margin-top:10px;padding-top:9px;border-top:1px solid var(--line);display:flex;justify-content:space-between;align-items:center">
+          <div style="font-size:10.5px;color:var(--ink-3)">CM done: <b style="color:var(--ink)">${inr(cm)}</b></div>
+          <div style="font-size:10.5px;color:${projDays&&+projDays<=5?'var(--good)':projDays&&+projDays<=12?'var(--warn)':'var(--danger)'}">
+            ${projDays ? `~${projDays} days/SH to close` : 'no rate data'}
+          </div>
+        </div>
+
+        <div style="margin-top:8px;font-size:10px;color:var(--ink-4);text-align:right">Tap for cluster detail →</div>
+      </div>`;
+    }).join('');
+
+    // sort button states
+    document.querySelectorAll('.pma-sort').forEach(btn => {
+      const active = btn.dataset.k === pmSortKey;
+      btn.style.background    = active ? 'var(--ss-navy)' : '#fff';
+      btn.style.color         = active ? '#fff' : 'var(--ink-3)';
+      btn.style.borderColor   = active ? 'var(--ss-navy)' : 'var(--line)';
+    });
+
+    // click → drill-down
+    document.querySelectorAll('.pma-cluster-card').forEach(card => {
+      card.addEventListener('mouseenter', () => { card.style.borderColor='var(--ss-amber)'; card.style.transform='translateY(-2px)'; card.style.boxShadow='0 4px 16px rgba(26,35,126,.12)'; });
+      card.addEventListener('mouseleave', () => { card.style.borderColor='var(--line)'; card.style.transform=''; card.style.boxShadow='0 1px 4px rgba(26,35,126,.05)'; });
+      card.addEventListener('click', () => renderPMACluster(card.dataset.cluster));
+    });
+  }
+
+  // sort buttons
+  document.querySelectorAll('.pma-sort').forEach(btn => {
+    btn.addEventListener('click', () => {
+      if (pmSortKey === btn.dataset.k) pmSortAsc = !pmSortAsc;
+      else { pmSortKey = btn.dataset.k; pmSortAsc = pmSortKey==='% done'; }
+      renderPMACards();
+    });
+  });
+
+  renderPMACards();
+}
+
+// ── Cluster drill-down ────────────────────────────────────────────────────────
+function renderPMACluster(clusterName) {
+  const c = (DATA.clusters||[]).find(x=>x.cluster===clusterName);
+  if (!c) return;
+
+  const due    = c.pmDue || 0;
+  const done   = c.pmDone || 0;
+  const pct    = due > 0 ? done/due*100 : 0;
+  const bal    = Math.max(0, due - done);
+  const shs    = c.activeShB2C || c.activeSH || 0;
+  const forPM  = c.forPM || 0;
+  const forCM  = (c.forPmCm||0) - forPM;
+  const rr     = c.pmManDays > 0 ? done / c.pmManDays : 0;
+  const cpvPM  = c.cpvPM || 0;
+  const cpvBld = c.cpvBlended || 0;
+  const vdayPM = c.vDayPM || 0;
+  const vdayBld= c.vDayBlended || 0;
+  const cm     = c.cm || 0;
+  const maas   = c.maas || 0;
+  const b2b    = c.b2bVisits || 0;
+  const torque = (c.torquePM||0) + (c.torqueCM||0);
+  const totalV = c.totalVisits || 0;
+  const projDays = rr > 0 ? (bal / rr / Math.max(forPM,1)).toFixed(1) : null;
+  const pctColor = pct>=85?'var(--good)':pct>=70?'var(--ss-amber)':'var(--danger)';
+
+  // SH-level data for this cluster
+  const shRows = (DATA.shLevel||[])
+    .filter(r=>r.cluster===clusterName && r.group!=='no_master')
+    .map(r=>({
+      name:r.name, empCode:r.empCode, status:r.status, team:r.team,
+      category:r.category, pm:r.pm||0, cm:r.cm||0, total:r.total||0,
+      salary:r.salary||0, totalCost:r.totalCost||0, cpv:r.cpv||0, splitCity:r.splitCity
+    }))
+    .sort((a,b)=>b.pm-a.pm);
+
+  const shMax = shRows.length ? Math.max(...shRows.map(r=>r.pm),1) : 1;
+  const shTotalPM = shRows.reduce((s,r)=>s+r.pm,0);
+
+  const backBtn = `<button onclick="renderPMAdherence()"
+    style="display:inline-flex;align-items:center;gap:6px;padding:6px 14px;border:1px solid var(--line);border-radius:20px;
+           background:#fff;color:var(--ink-2);font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;margin-bottom:22px">
+    ← All clusters
+  </button>`;
+
+  const kpis = [
+    { lbl:'PM Due',         val:inr(Math.round(due)),          sub:'this month',          col:'var(--ink)' },
+    { lbl:'PM Done',        val:inr(done),                     sub:`${pct.toFixed(1)}% complete`, col:'var(--good)' },
+    { lbl:'Balance',        val:inr(Math.round(bal)),          sub:'still open',          col:bal>0?'var(--danger)':'var(--good)' },
+    { lbl:'Run Rate',       val:rr.toFixed(2),                 sub:'PM visits/SH-day',    col:'var(--ss-navy)' },
+    { lbl:'SH-days to close',val:projDays?inr(Math.round(projDays*forPM)):'—', sub:`at ${rr.toFixed(1)} rate`, col:projDays&&+projDays<=5?'var(--good)':'var(--warn)' },
+    { lbl:'Active SHs',     val:shs,                           sub:`${forPM} on PM · ${forCM} CM`, col:'var(--ink)' },
+    { lbl:'CPV — PM',       val:cpvPM>0?'₹'+inr(Math.round(cpvPM)):'—', sub:'cost÷adj.visits', col:'var(--ss-navy)' },
+    { lbl:'V/Day PM',       val:vdayPM.toFixed(2),             sub:'PM÷PM man-days',      col:'var(--ss-navy)' },
+  ].map(k=>`<div class="cost-tile" style="flex:1;min-width:130px">
+    <div class="lbl">${k.lbl}</div>
+    <div class="val" style="color:${k.col}">${k.val}</div>
+    <div class="pct">${k.sub}</div>
+  </div>`).join('');
+
+  // Visit breakdown bars
+  const visitTypes = [
+    { label:'PM Done',  val:done,   color:'var(--good)' },
+    { label:'CM',       val:cm,     color:'var(--ss-amber)' },
+    { label:'MAAS',     val:maas,   color:'var(--b2b)' },
+    { label:'B2B',      val:b2b,    color:'#5E35B1' },
+    { label:'Torque',   val:torque, color:'var(--ink-3)' },
+  ].filter(v=>v.val>0);
+  const vtMax = Math.max(...visitTypes.map(v=>v.val),1);
+  const visitBars = visitTypes.map(v=>`
+    <div style="display:flex;align-items:center;gap:10px">
+      <div style="width:80px;font-size:11.5px;font-weight:500;color:var(--ink)">${v.label}</div>
+      <div style="flex:1;height:14px;background:var(--bg-2);border-radius:4px;overflow:hidden">
+        <div style="height:100%;width:${(v.val/vtMax*100).toFixed(0)}%;background:${v.color};border-radius:4px"></div>
+      </div>
+      <div style="width:50px;text-align:right;font-size:12px;font-weight:700;color:var(--ink)">${inr(v.val)}</div>
+      <div style="width:36px;text-align:right;font-size:11px;color:var(--ink-3)">${totalV?Math.round(v.val/totalV*100):0}%</div>
+    </div>`).join('');
+
+  // SH table rows
+  const shTableRows = shRows.map(r=>{
+    const teamColor = (r.team||'').toLowerCase()==='b2b'?'var(--b2b)':(r.team||'').toLowerCase()==='b2c'?'var(--good)':'var(--ink-3)';
+    const pctOfCluster = shTotalPM>0?Math.round(r.pm/shTotalPM*100):0;
+    return `<tr>
+      <td style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--ink-3)">${r.empCode||'—'}</td>
+      <td style="font-weight:600">${r.name}${r.splitCity?'<span style="font-size:9px;color:var(--ink-4);margin-left:4px">⤷ visits only</span>':''}</td>
+      <td><span style="font-size:11px;font-weight:600;color:${teamColor}">${r.team||'—'}</span></td>
+      <td style="color:var(--ink-3);font-size:11px">${r.category||'—'}</td>
+      <td style="color:${(r.status||'').toLowerCase()==='active'?'var(--good)':'var(--ink-3)'};font-size:11px">${r.status||'—'}</td>
+      <td style="text-align:right;font-weight:700;color:var(--good)">${inr(r.pm)}</td>
+      <td style="text-align:right;color:var(--ink-3)">${inr(r.cm)}</td>
+      <td style="text-align:right;font-weight:600">${inr(r.total)}</td>
+      <td style="text-align:right">
+        <div style="display:flex;align-items:center;justify-content:flex-end;gap:6px">
+          <div style="width:60px;height:5px;background:var(--bg-2);border-radius:3px;overflow:hidden">
+            <div style="height:100%;width:${shMax>0?Math.round(r.pm/shMax*100):0}%;background:var(--good);border-radius:3px"></div>
+          </div>
+          <span style="font-size:10px;color:var(--ink-4);width:24px;text-align:right">${pctOfCluster}%</span>
+        </div>
+      </td>
+      <td style="text-align:right;color:${r.cpv>cpvPM*1.4?'var(--danger)':r.cpv>0&&r.cpv<cpvPM*0.85?'var(--good)':'var(--ink-2)'};font-weight:600">${r.cpv>0?'₹'+inr(r.cpv):'—'}</td>
+      <td style="font-size:11px;font-size:10.5px;color:var(--ink-4)">N/A</td>
+    </tr>`;
+  }).join('');
+
+  document.getElementById('app').innerHTML = `
+    <div class="section" style="margin-top:0">
+      <div class="eye">PM Adherence · Cluster Detail</div>
+      <h2>${clusterName}</h2>
+      ${backBtn}
+
+      <!-- KPI strip -->
+      <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:24px">${kpis}</div>
+
+      <!-- Completion bar -->
+      <div class="card" style="padding:20px 22px;margin-bottom:22px">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px">
+          <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--ink-3)">PM Completion — ${clusterName}</div>
+          <div style="font-size:13px;font-weight:700;color:${pctColor}">${pct.toFixed(1)}% · ${inr(done)} of ${inr(Math.round(due))}</div>
+        </div>
+        <div style="height:14px;background:var(--bg-2);border-radius:7px;overflow:hidden">
+          <div style="height:100%;width:${Math.min(100,pct).toFixed(1)}%;background:${pctColor};border-radius:7px;transition:width .4s"></div>
+        </div>
+        <div style="display:flex;justify-content:space-between;margin-top:8px;font-size:11px;color:var(--ink-3)">
+          <span>Balance: <b style="color:var(--danger)">${inr(Math.round(bal))}</b></span>
+          <span>V/Day Blended: <b>${vdayBld.toFixed(2)}</b></span>
+          <span>CPV Blended: <b>₹${inr(Math.round(cpvBld))}</b></span>
+        </div>
+      </div>
+
+      <!-- Visit type breakdown -->
+      <div class="card" style="padding:20px 22px;margin-bottom:22px">
+        <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--ink-3);margin-bottom:14px">Visit breakdown — all types</div>
+        <div style="display:flex;flex-direction:column;gap:10px">${visitBars}</div>
+      </div>
+
+      <!-- SH detail table -->
+      <div class="tbl-wrap">
+        <div class="tbl-head">
+          <h3>SH-level PM detail — ${clusterName} (${shRows.length} people)</h3>
+        </div>
+        <div style="overflow-x:auto">
+          <table>
+            <thead><tr>
+              <th style="text-align:left">EMP Code</th>
+              <th style="text-align:left">Name</th>
+              <th style="text-align:left">Team</th>
+              <th style="text-align:left">Category</th>
+              <th style="text-align:left">Status</th>
+              <th style="text-align:right">PM Done</th>
+              <th style="text-align:right">CM</th>
+              <th style="text-align:right">Total</th>
+              <th style="text-align:right">PM share</th>
+              <th style="text-align:right">CPV</th>
+              <th style="text-align:right">DOJ</th>
+            </tr></thead>
+            <tbody>${shTableRows}</tbody>
+          </table>
+        </div>
+      </div>
+      <p style="font-size:11px;color:var(--ink-3);margin-top:8px">DOJ not available in current data feed — shown as N/A. CPV flags >140% of cluster avg in red, <85% in green.</p>
+    </div>
+  `;
+}
+
+const RENDER = { overview: renderOverview, quadrant: renderQuadrant, clusters: renderClusters, shdaily: renderSHDaily, deepdive: renderDeepDive, cityiq: renderCityIQ, clustersh: renderClusterSH, pmadherence: renderPMAdherence };
 let currentTab = "overview";
 
 function switchTab(name) {
