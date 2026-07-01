@@ -82,6 +82,13 @@ body{font-size:14px;line-height:1.5}
 .tab.active{color:var(--ss-navy);border-bottom-color:var(--ss-amber)}
 .tab:hover:not(.active){color:var(--ss-navy-2)}
 
+/* ── MONTH SELECTOR (pill style, sits above the view tabs) ── */
+.month-tabs{display:flex;gap:6px;margin-top:14px;width:fit-content;background:var(--ss-sky-2);padding:4px;border-radius:9px}
+.month-tab{padding:6px 16px;font-size:12px;font-weight:700;color:var(--ink-3);background:transparent;border:0;border-radius:6px;cursor:pointer;font-family:inherit;letter-spacing:.03em;text-transform:uppercase;transition:all .15s}
+.month-tab.active{color:#fff;background:var(--ss-navy);box-shadow:0 1px 4px rgba(26,35,126,.25)}
+.month-tab:hover:not(.active){color:var(--ss-navy)}
+.month-tab:disabled{opacity:.4;cursor:not-allowed}
+
 /* ── EYE (section label) ── */
 .eye{font-size:10.5px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--ss-amber);margin-bottom:4px}
 
@@ -273,6 +280,10 @@ tbody tr:last-child td{border-bottom:0}
     <div>
       <div class="eye">Field operations · live</div>
       <h1>Cost per visit <em id="hdr-month">— loading</em></h1>
+      <div class="month-tabs" role="tablist" id="month-tabs">
+        <button class="month-tab active" data-month="june">June</button>
+        <button class="month-tab" data-month="july">July</button>
+      </div>
       <div class="tabs" role="tablist">
         <button class="tab active" data-tab="overview">B2C Overview</button>
         <button class="tab" data-tab="quadrant">Performance</button>
@@ -304,7 +315,14 @@ tbody tr:last-child td{border-bottom:0}
 // ═════════════════════════════════════════════════════════════════════════════
 // Paste your Apps Script web app URL here after deploying WebApp.gs.
 // Until you do, the dashboard renders from embedded sample data.
-const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbz4Aj5Pg9EBDm2K_K6XJWyFmGa9MGS8PDDTigU3x0bL4Zb9rptZrkAdk86icVqPRwzU/exec";   // ← paste URL here
+// Paste your Apps Script web app URLs here after deploying WebApp.gs — one per month.
+// Until you do, the dashboard renders from embedded sample data.
+const MONTH_URLS = {
+  june: "https://script.google.com/macros/s/AKfycbz4Aj5Pg9EBDm2K_K6XJWyFmGa9MGS8PDDTigU3x0bL4Zb9rptZrkAdk86icVqPRwzU/exec",
+  july: "https://script.google.com/macros/s/AKfycbw1kvdQFbjLmGepQvUAL4vBUW21kAMohO98Hzegyw9pLngnpGlV1nathvmq6bwhEpeS/exec"
+};
+let currentMonthKey = "june";
+const WEB_APP_URL = MONTH_URLS[currentMonthKey];   // ← kept for backward-compat with any code referencing it
 
 // ═════════════════════════════════════════════════════════════════════════════
 // EMBEDDED FALLBACK (so preview works before web app is deployed)
@@ -314,23 +332,36 @@ const FALLBACK_DATA = {"meta":{"asOf":"2026-06-24","month":"June 2026","currency
 // FETCH + RENDER
 // ═════════════════════════════════════════════════════════════════════════════
 let DATA = null;
+const dataCache = {}; // month key -> loaded payload, so re-switching doesn't refetch
 
-async function loadData() {
-  if (!WEB_APP_URL) {
+async function loadData(monthKey) {
+  monthKey = monthKey || currentMonthKey;
+  const url = MONTH_URLS[monthKey];
+
+  if (dataCache[monthKey]) {
+    DATA = dataCache[monthKey];
+    setStatus("LIVE", "as of " + (DATA.meta && DATA.meta.asOf ? new Date(DATA.meta.asOf).toLocaleString() : "now"), false);
+    return;
+  }
+
+  if (!url) {
     DATA = FALLBACK_DATA;
+    dataCache[monthKey] = DATA;
     setStatus("PREVIEW MODE", "embedded fallback · paste web app URL to go live", true);
     return;
   }
   try {
     setStatus("LOADING…", "fetching from sheet", false);
-    const res = await fetch(WEB_APP_URL, { redirect: "follow" });
+    const res = await fetch(url, { redirect: "follow" });
     if (!res.ok) throw new Error("HTTP " + res.status);
     const json = await res.json();
     if (json.error) throw new Error(json.error);
     DATA = json;
+    dataCache[monthKey] = DATA;
     setStatus("LIVE", "as of " + (json.meta && json.meta.asOf ? new Date(json.meta.asOf).toLocaleString() : "now"), false);
   } catch (e) {
     DATA = FALLBACK_DATA;
+    dataCache[monthKey] = DATA;
     setStatus("OFFLINE", "fetch failed — showing fallback", true);
     console.error(e);
   }
@@ -2426,12 +2457,30 @@ document.querySelectorAll(".tab").forEach(t => {
 });
 
 // ═════════════════════════════════════════════════════════════════════════════
+// MONTH SWITCHING
+// ═════════════════════════════════════════════════════════════════════════════
+async function switchMonth(monthKey) {
+  if (monthKey === currentMonthKey) return;
+  currentMonthKey = monthKey;
+  document.querySelectorAll(".month-tab").forEach(t => t.classList.toggle("active", t.dataset.month === monthKey));
+  document.getElementById("app").innerHTML = `<div class="loading"><span class="spin"></span>Loading data…</div>`;
+  await loadData(monthKey);
+  renderHeader();
+  destroyCharts();
+  RENDER[currentTab]();
+}
+
+document.querySelectorAll(".month-tab").forEach(t => {
+  t.addEventListener("click", () => switchMonth(t.dataset.month));
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
 // BOOT
 // ═════════════════════════════════════════════════════════════════════════════
 (async () => {
   setChartDefaults();
   document.getElementById("app").innerHTML = `<div class="loading"><span class="spin"></span>Loading data…</div>`;
-  await loadData();
+  await loadData(currentMonthKey);
   renderHeader();
   switchTab("overview");
 })();
