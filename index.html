@@ -1987,7 +1987,7 @@ function redrawClusterSH() {
     <th data-csh="team" style="text-align:left;padding:11px 14px;cursor:pointer">Team</th>
     <th data-csh="category" style="text-align:left;padding:11px 14px;cursor:pointer">Type</th>
     <th style="text-align:left;padding:11px 14px">DOJ</th>
-    <th data-csh="sysDays" style="text-align:right;padding:11px 14px;cursor:pointer">Days in System</th>
+    <th data-csh="sysDays" style="text-align:right;padding:11px 14px;cursor:pointer">DIS</th>
     <th data-csh="salary" style="text-align:right;padding:11px 14px;cursor:pointer">Salary</th>
     <th data-csh="toolkit" style="text-align:right;padding:11px 14px;cursor:pointer">Toolkit</th>
     <th data-csh="otherCost" style="text-align:right;padding:11px 14px;cursor:pointer">Other (20%)</th>
@@ -2464,13 +2464,13 @@ function renderPMACluster(clusterName) {
               <th style="text-align:right">PM share</th>
               <th style="text-align:right">CPV</th>
               <th style="text-align:left">DOJ</th>
-              <th style="text-align:right">Days in System</th>
+              <th style="text-align:right">DIS</th>
             </tr></thead>
             <tbody>${shTableRows}</tbody>
           </table>
         </div>
       </div>
-      <p style="font-size:11px;color:var(--ink-3);margin-top:8px">Days in System = today − DOJ (from All SH Mastersheet). CPV flags &gt;140% of cluster avg in red, &lt;85% in green.</p>
+      <p style="font-size:11px;color:var(--ink-3);margin-top:8px">DIS = today − DOJ (from All SH Mastersheet). CPV flags &gt;140% of cluster avg in red, &lt;85% in green.</p>
     </div>
   `;
 }
