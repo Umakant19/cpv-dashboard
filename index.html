@@ -387,6 +387,28 @@ const inrShort = n => {
 const pct = (a, b) => (b ? (a / b * 100).toFixed(1) : "0") + "%";
 const round = (n, d=0) => +(+n || 0).toFixed(d);
 
+// ── DOJ / System Days helpers ────────────────────────────────────────────────
+const DOJ_MONTHS = {Jan:0,Feb:1,Mar:2,Apr:3,May:4,Jun:5,Jul:6,Aug:7,Sep:8,Oct:9,Nov:10,Dec:11};
+function parseDojDate(s) {
+  if (!s) return null;
+  const str = String(s).trim();
+  let m = str.match(/^(\d{1,2})-([A-Za-z]{3})-(\d{4})$/);
+  if (m && DOJ_MONTHS[m[2]] !== undefined) return new Date(+m[3], DOJ_MONTHS[m[2]], +m[1]);
+  m = str.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (m) return new Date(+m[1], +m[2]-1, +m[3]);
+  const d = new Date(str);
+  return isNaN(d.getTime()) ? null : d;
+}
+function systemDaysFromDoj(dojStr) {
+  const d = parseDojDate(dojStr);
+  if (!d) return null;
+  const today = new Date();
+  today.setHours(0,0,0,0);
+  d.setHours(0,0,0,0);
+  const diff = Math.round((today - d) / 86400000);
+  return diff >= 0 ? diff + 1 : diff; // day of joining counts as day 1
+}
+
 // ═════════════════════════════════════════════════════════════════════════════
 // CHART DEFAULTS
 // ═════════════════════════════════════════════════════════════════════════════
@@ -1718,7 +1740,7 @@ function redrawCityIQ() {
         for(let i=from-1;i<to;i++) v+=(r.typeDays[t][i]||0);
       });
       const meta = shLevelMap[r.empCode] || shLevelMap[r.name] || {};
-      return { name:r.name, empCode:r.empCode, visits:v, team:meta.team||'—', category:meta.category||'—', status:meta.status||'—' };
+      return { name:r.name, empCode:r.empCode, visits:v, team:meta.team||'—', category:meta.category||'—', status:meta.status||'—', doj:meta.doj||'' };
     }).filter(r=>r.visits>0).sort((a,b)=>b.visits-a.visits);
 
     const maxSH = shRows.length ? shRows[0].visits : 1;
@@ -1782,6 +1804,7 @@ function redrawCityIQ() {
       const w = Math.round(r.visits/maxSH*100);
       const pctV = total ? Math.round(r.visits/total*100) : 0;
       const teamColor = (r.team||'').toLowerCase()==='b2b'?'var(--b2b)':(r.team||'').toLowerCase()==='b2c'?'var(--good)':'var(--ink-3)';
+      const sysDays = systemDaysFromDoj(r.doj);
       return `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--line)">
         <div style="width:120px;font-size:12px;font-weight:500;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${r.name}">${r.name}</div>
         <div style="font-size:10px;color:var(--ink-4);font-family:'JetBrains Mono',monospace;width:60px">${r.empCode||'—'}</div>
@@ -1789,7 +1812,7 @@ function redrawCityIQ() {
           <span style="font-size:10px;font-weight:600;color:${teamColor};padding:2px 6px;background:${(r.team||'').toLowerCase()==='b2b'?'var(--b2b-soft)':'var(--good-soft)'};border-radius:4px">${r.team||'—'}</span>
         </div>
         <div style="width:48px;font-size:10px;color:var(--ink-4)">${r.category&&r.category!=='—'?r.category:'—'}</div>
-        <div style="width:40px;font-size:10px;color:var(--ink-4)">N/A</div>
+        <div style="width:40px;font-size:10px;color:${sysDays===null?'var(--ink-4)':sysDays<=30?'var(--warn,#B45309)':'var(--ink-3)'}" title="${r.doj?'DOJ: '+r.doj:''}">${sysDays!==null?sysDays:'—'}</div>
         <div style="flex:1;height:7px;background:var(--bg-2);border-radius:4px;overflow:hidden">
           <div style="height:100%;width:${w}%;background:var(--ss-navy);border-radius:4px"></div>
         </div>
@@ -1829,7 +1852,7 @@ function redrawCityIQ() {
           <div style="width:60px;font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-4)">EMP Code</div>
           <div style="width:52px;font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-4)">Team</div>
           <div style="width:48px;font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-4)">Type</div>
-          <div style="width:40px;font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-4)">DOJ</div>
+          <div style="width:40px;font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-4)">Days</div>
           <div style="flex:1;font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-4)">Visits</div>
           <div style="width:28px;font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-4);text-align:right">#</div>
           <div style="width:28px;font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-4);text-align:right">%</div>
@@ -1908,6 +1931,7 @@ function redrawClusterSH() {
     String(r.empCode || '').toLowerCase().includes(q) ||
     String(r.name || '').toLowerCase().includes(q)
   );
+  rows.forEach(r => { r.sysDays = systemDaysFromDoj(r.doj); });
 
   // cluster aggregates
   const totalCost = rows.reduce((s,r) => s + (r.totalCost||0), 0);
@@ -1963,6 +1987,7 @@ function redrawClusterSH() {
     <th data-csh="team" style="text-align:left;padding:11px 14px;cursor:pointer">Team</th>
     <th data-csh="category" style="text-align:left;padding:11px 14px;cursor:pointer">Type</th>
     <th style="text-align:left;padding:11px 14px">DOJ</th>
+    <th data-csh="sysDays" style="text-align:right;padding:11px 14px;cursor:pointer">Days in System</th>
     <th data-csh="salary" style="text-align:right;padding:11px 14px;cursor:pointer">Salary</th>
     <th data-csh="toolkit" style="text-align:right;padding:11px 14px;cursor:pointer">Toolkit</th>
     <th data-csh="otherCost" style="text-align:right;padding:11px 14px;cursor:pointer">Other (20%)</th>
@@ -1981,13 +2006,16 @@ function redrawClusterSH() {
                : highCpv ? '<span class="chip warn">high CPV</span>' : '';
     const inactive = (r.status||'').toLowerCase() !== 'active';
     const costBar = `<span class="barcell" style="width:50px"><i style="width:${((r.totalCost||0)/maxCost*100).toFixed(0)}%;background:${highCpv||isZero?'var(--danger)':'var(--accent)'}"></i></span>`;
+    const sysDays = r.sysDays;
+    const sysDaysColor = sysDays === null ? 'var(--ink-4)' : sysDays <= 30 ? 'var(--warn,#B45309)' : 'var(--ink-2)';
     return `<tr style="${isZero||highCpv ? 'background:linear-gradient(90deg,var(--danger-soft) 0%,transparent 50%)' : ''}">
       <td style="text-align:left;font-family:'JetBrains Mono',monospace;font-size:11px;color:${r.empCode?'var(--ink-2)':'var(--ink-4)'}">${r.empCode || '—'}${r.matchBy === 'name' ? '<span title="matched by name, no code" style="color:var(--warn);font-size:9px"> ~</span>' : ''}</td>
       <td style="text-align:left;font-weight:500">${r.name} ${flag}${r.splitCity ? '<span title="visits in this city; salary counted in home cluster" style="font-size:9px;color:var(--ink-3);font-weight:400;margin-left:4px">⤷ visits only</span>' : ''}</td>
       <td style="text-align:left"><span style="color:${inactive?'var(--ink-3)':'var(--good)'};font-size:11px">${r.status||'—'}</span></td>
       <td style="text-align:left;font-size:11px"><span class="chip ${(r.team||'').toLowerCase()==='b2b'?'b2b':''}">${r.team||'—'}</span></td>
       <td style="text-align:left;color:var(--ink-3);font-size:11px">${r.category||'—'}</td>
-      <td style="text-align:left;color:var(--ink-4);font-size:11px">N/A</td>
+      <td style="text-align:left;color:var(--ink-3);font-size:11px;font-family:'JetBrains Mono',monospace">${r.doj || '—'}</td>
+      <td style="text-align:right;font-weight:600;color:${sysDaysColor}">${sysDays !== null ? sysDays : '—'}</td>
       <td style="text-align:right">₹${inr(r.salary||0)}</td>
       <td style="text-align:right;color:var(--ink-3)">₹${inr(r.toolkit||0)}</td>
       <td style="text-align:right;color:var(--ink-3)">₹${inr(r.otherCost||0)}</td>
@@ -2309,7 +2337,8 @@ function renderPMACluster(clusterName) {
     .map(r=>({
       name:r.name, empCode:r.empCode, status:r.status, team:r.team,
       category:r.category, pm:r.pm||0, cm:r.cm||0, total:r.total||0,
-      salary:r.salary||0, totalCost:r.totalCost||0, cpv:r.cpv||0, splitCity:r.splitCity
+      salary:r.salary||0, totalCost:r.totalCost||0, cpv:r.cpv||0, splitCity:r.splitCity,
+      doj: r.doj||''
     }))
     .sort((a,b)=>b.pm-a.pm);
 
@@ -2360,6 +2389,8 @@ function renderPMACluster(clusterName) {
   const shTableRows = shRows.map(r=>{
     const teamColor = (r.team||'').toLowerCase()==='b2b'?'var(--b2b)':(r.team||'').toLowerCase()==='b2c'?'var(--good)':'var(--ink-3)';
     const pctOfCluster = shTotalPM>0?Math.round(r.pm/shTotalPM*100):0;
+    const sysDays = systemDaysFromDoj(r.doj);
+    const sysDaysColor = sysDays === null ? 'var(--ink-4)' : sysDays <= 30 ? 'var(--warn,#B45309)' : 'var(--ink-2)';
     return `<tr>
       <td style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--ink-3)">${r.empCode||'—'}</td>
       <td style="font-weight:600">${r.name}${r.splitCity?'<span style="font-size:9px;color:var(--ink-4);margin-left:4px">⤷ visits only</span>':''}</td>
@@ -2378,7 +2409,8 @@ function renderPMACluster(clusterName) {
         </div>
       </td>
       <td style="text-align:right;color:${r.cpv>cpvPM*1.4?'var(--danger)':r.cpv>0&&r.cpv<cpvPM*0.85?'var(--good)':'var(--ink-2)'};font-weight:600">${r.cpv>0?'₹'+inr(r.cpv):'—'}</td>
-      <td style="font-size:11px;font-size:10.5px;color:var(--ink-4)">N/A</td>
+      <td style="text-align:left;font-size:10.5px;color:var(--ink-3);font-family:'JetBrains Mono',monospace">${r.doj || '—'}</td>
+      <td style="text-align:right;font-size:11.5px;font-weight:600;color:${sysDaysColor}">${sysDays !== null ? sysDays : '—'}</td>
     </tr>`;
   }).join('');
 
@@ -2431,13 +2463,14 @@ function renderPMACluster(clusterName) {
               <th style="text-align:right">Total</th>
               <th style="text-align:right">PM share</th>
               <th style="text-align:right">CPV</th>
-              <th style="text-align:right">DOJ</th>
+              <th style="text-align:left">DOJ</th>
+              <th style="text-align:right">Days in System</th>
             </tr></thead>
             <tbody>${shTableRows}</tbody>
           </table>
         </div>
       </div>
-      <p style="font-size:11px;color:var(--ink-3);margin-top:8px">DOJ not available in current data feed — shown as N/A. CPV flags >140% of cluster avg in red, <85% in green.</p>
+      <p style="font-size:11px;color:var(--ink-3);margin-top:8px">Days in System = today − DOJ (from All SH Mastersheet). CPV flags &gt;140% of cluster avg in red, &lt;85% in green.</p>
     </div>
   `;
 }
