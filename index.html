@@ -293,6 +293,7 @@ tbody tr:last-child td{border-bottom:0}
         <button class="tab" data-tab="cityiq">City Intelligence</button>
         <button class="tab" data-tab="clustersh">Cluster SH Costs</button>
         <button class="tab" data-tab="pmadherence">PM Adherence</button>
+        <button class="tab" data-tab="shoverall">SH - Overall</button>
       </div>
     </div>
     <div class="meta">
@@ -1739,8 +1740,20 @@ function redrawCityIQ() {
         if(st.type!=='All'&&t!==st.type) return;
         for(let i=from-1;i<to;i++) v+=(r.typeDays[t][i]||0);
       });
+      // attended days = days in window with >=1 visit of the selected type
+      let att=0;
+      for(let i=from-1;i<to;i++){
+        let dv=0;
+        Object.keys(r.typeDays||{}).forEach(t=>{
+          if(st.type!=='All'&&t!==st.type) return;
+          dv+=(r.typeDays[t][i]||0);
+        });
+        if(dv>0) att++;
+      }
       const meta = shLevelMap[r.empCode] || shLevelMap[r.name] || {};
-      return { name:r.name, empCode:r.empCode, visits:v, team:meta.team||'—', category:meta.category||'—', status:meta.status||'—', doj:meta.doj||'' };
+      return { name:r.name, empCode:r.empCode, visits:v, attDays:att, vPerAtt: att? v/att : 0,
+               team:meta.team||'—', category:meta.category||'—', status:meta.status||'—',
+               doj:meta.doj||meta.DOJ||meta.finalDoj||'' };
     }).filter(r=>r.visits>0).sort((a,b)=>b.visits-a.visits);
 
     const maxSH = shRows.length ? shRows[0].visits : 1;
@@ -1805,6 +1818,8 @@ function redrawCityIQ() {
       const pctV = total ? Math.round(r.visits/total*100) : 0;
       const teamColor = (r.team||'').toLowerCase()==='b2b'?'var(--b2b)':(r.team||'').toLowerCase()==='b2c'?'var(--good)':'var(--ink-3)';
       const sysDays = systemDaysFromDoj(r.doj);
+      const attPct  = winDays ? Math.round(r.attDays/winDays*100) : 0;
+      const attCol  = attPct>=80?'var(--good)':attPct>=50?'var(--ink-2)':'var(--danger)';
       return `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--line)">
         <div style="width:120px;font-size:12px;font-weight:500;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${r.name}">${r.name}</div>
         <div style="font-size:10px;color:var(--ink-4);font-family:'JetBrains Mono',monospace;width:60px">${r.empCode||'—'}</div>
@@ -1812,7 +1827,12 @@ function redrawCityIQ() {
           <span style="font-size:10px;font-weight:600;color:${teamColor};padding:2px 6px;background:${(r.team||'').toLowerCase()==='b2b'?'var(--b2b-soft)':'var(--good-soft)'};border-radius:4px">${r.team||'—'}</span>
         </div>
         <div style="width:48px;font-size:10px;color:var(--ink-4)">${r.category&&r.category!=='—'?r.category:'—'}</div>
-        <div style="width:40px;font-size:10px;color:${sysDays===null?'var(--ink-4)':sysDays<=30?'var(--warn,#B45309)':'var(--ink-3)'}" title="${r.doj?'DOJ: '+r.doj:''}">${sysDays!==null?sysDays:'—'}</div>
+        <div style="width:72px;font-size:10px;color:${sysDays!==null&&sysDays<=30?'var(--warn,#B45309)':'var(--ink-3)'};font-family:'JetBrains Mono',monospace"
+             title="${sysDays!==null?sysDays+' days in system':'DOJ not available in current data feed'}">${r.doj||'—'}</div>
+        <div style="width:56px;font-size:11px;font-weight:600;color:${attCol}" title="${r.attDays} of ${winDays} days in window · ${attPct}%">
+          ${r.attDays}<span style="font-size:9px;font-weight:400;color:var(--ink-4)">/${winDays}</span>
+        </div>
+        <div style="width:40px;font-size:10px;color:var(--ink-3)" title="visits per attended day">${r.vPerAtt?r.vPerAtt.toFixed(1):'—'}</div>
         <div style="flex:1;height:7px;background:var(--bg-2);border-radius:4px;overflow:hidden">
           <div style="height:100%;width:${w}%;background:var(--ss-navy);border-radius:4px"></div>
         </div>
@@ -1852,7 +1872,9 @@ function redrawCityIQ() {
           <div style="width:60px;font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-4)">EMP Code</div>
           <div style="width:52px;font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-4)">Team</div>
           <div style="width:48px;font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-4)">Type</div>
-          <div style="width:40px;font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-4)">Days</div>
+          <div style="width:72px;font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-4)">DOJ</div>
+          <div style="width:56px;font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-4)">Att. Days</div>
+          <div style="width:40px;font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-4)">V/Day</div>
           <div style="flex:1;font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-4)">Visits</div>
           <div style="width:28px;font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-4);text-align:right">#</div>
           <div style="width:28px;font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-4);text-align:right">%</div>
@@ -2077,42 +2099,44 @@ function renderPMAdherence() {
   }
 
   // ── Grand totals ──
-  const G = {
-    pmDue:       clusters.reduce((s,c)=>s+(c.pmDue||0),0),
-    pmDone:      clusters.reduce((s,c)=>s+(c.pmDone||0),0),
-    cm:          clusters.reduce((s,c)=>s+(c.cm||0),0),
-    activeSH:    clusters.reduce((s,c)=>s+(c.activeShB2C||c.activeSH||0),0),
-    forPM:       clusters.reduce((s,c)=>s+(c.forPM||0),0),
-    totalCost:   clusters.reduce((s,c)=>s+(c.totalCost||0),0),
-    costPM:      clusters.reduce((s,c)=>s+(c.costPM||0),0),
-    manDays:     clusters.reduce((s,c)=>s+(c.manDays||0),0),
-    pmManDays:   clusters.reduce((s,c)=>s+(c.pmManDays||0),0),
-    pmTmAdj:     clusters.reduce((s,c)=>s+(c.pmTmAdj||0),0),
-  };
-  G.pctDone   = G.pmDue > 0 ? (G.pmDone / G.pmDue * 100) : 0;
-  G.balance   = Math.max(0, G.pmDue - G.pmDone);
-  G.cpvPM     = G.pmTmAdj > 0 ? G.costPM / G.pmTmAdj : 0;
-  G.vDayPM    = G.pmManDays > 0 ? G.pmDone / G.pmManDays : 0;
-  // productive run rate = PM done / working SH days
-  G.runRate   = G.pmManDays > 0 ? G.pmDone / G.pmManDays : 0;
-  // tickets closing projection: at current run rate, days to close balance
-  G.daysInMonth = DATA.meta.daysInMonth || 30;
-  const elapsed = G.daysInMonth * 0.7; // approx days elapsed in month from context
-  G.daysLeft  = G.daysInMonth - elapsed;
-  G.projClose = G.runRate > 0 ? G.balance / G.runRate : null;  // SH-days needed
+  // ── multi-city selection state (default = all) ──
+  const pmaAllCities = clusters.map(c=>c.cluster).sort((a,b)=>a.localeCompare(b));
+  let  pmaSel = new Set(pmaAllCities);
+  const pmaList = () => clusters.filter(c => pmaSel.has(c.cluster));
 
-  const html = `
-    <div class="section" style="margin-top:0">
-      <div class="eye">Field performance · ${DATA.meta.month||''}</div>
-      <h2>PM Adherence & Completion</h2>
-      <p class="lead">PM due vs done, balance, run rate, and projected close across all clusters. Click any cluster card to drill into its detail.</p>
+  function pmaTotals(list) {
+    const G = {
+      pmDue:     list.reduce((s,c)=>s+(c.pmDue||0),0),
+      pmDone:    list.reduce((s,c)=>s+(c.pmDone||0),0),
+      cm:        list.reduce((s,c)=>s+(c.cm||0),0),
+      activeSH:  list.reduce((s,c)=>s+(c.activeShB2C||c.activeSH||0),0),
+      forPM:     list.reduce((s,c)=>s+(c.forPM||0),0),
+      totalCost: list.reduce((s,c)=>s+(c.totalCost||0),0),
+      costPM:    list.reduce((s,c)=>s+(c.costPM||0),0),
+      manDays:   list.reduce((s,c)=>s+(c.manDays||0),0),
+      pmManDays: list.reduce((s,c)=>s+(c.pmManDays||0),0),
+      pmTmAdj:   list.reduce((s,c)=>s+(c.pmTmAdj||0),0),
+    };
+    G.pctDone = G.pmDue > 0 ? (G.pmDone / G.pmDue * 100) : 0;
+    G.balance = Math.max(0, G.pmDue - G.pmDone);
+    G.cpvPM   = G.pmTmAdj   > 0 ? G.costPM / G.pmTmAdj  : 0;
+    G.vDayPM  = G.pmManDays > 0 ? G.pmDone / G.pmManDays : 0;
+    G.runRate = G.pmManDays > 0 ? G.pmDone / G.pmManDays : 0;
+    G.daysInMonth = DATA.meta.daysInMonth || 30;
+    G.daysLeft  = G.daysInMonth - (G.daysInMonth * 0.7);
+    G.projClose = G.runRate > 0 ? G.balance / G.runRate : null;
+    G.nCities   = list.length;
+    return G;
+  }
+  const G = pmaTotals(clusters);
 
+  function pmaTopHtml(G) { return `
       <!-- Grand total hero strip -->
       <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:0;border-radius:12px;overflow:hidden;border:1px solid var(--line);margin-bottom:28px;box-shadow:0 2px 8px rgba(26,35,126,.07)">
         <div style="padding:22px 24px;background:var(--ss-navy);border-right:1px solid rgba(255,255,255,.12)">
           <div style="font-size:10px;text-transform:uppercase;letter-spacing:.13em;color:var(--ss-amber);font-weight:700;margin-bottom:8px">PM Due (Total)</div>
           <div style="font-size:32px;font-weight:800;color:#fff;letter-spacing:-.02em">${inr(Math.round(G.pmDue))}</div>
-          <div style="font-size:11px;color:rgba(255,255,255,.55);margin-top:6px">${clusters.length} clusters · ${inr(G.forPM)} dedicated SHs</div>
+          <div style="font-size:11px;color:rgba(255,255,255,.55);margin-top:6px">${G.nCities} ${G.nCities===1?'city':'cities'} · ${inr(G.forPM)} dedicated SHs</div>
         </div>
         <div style="padding:22px 24px;background:#fff;border-right:1px solid var(--line)">
           <div style="font-size:10px;text-transform:uppercase;letter-spacing:.13em;color:var(--ink-3);font-weight:700;margin-bottom:8px">PM Done</div>
@@ -2170,10 +2194,38 @@ function renderPMAdherence() {
           <span>0</span><span style="color:var(--warn);font-weight:600">70% target</span><span style="color:var(--good);font-weight:600">85% good</span><span>${inr(Math.round(G.pmDue))}</span>
         </div>
       </div>
+  `; }
 
-      <!-- Cluster cards grid -->
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
-        <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--ink-3)">${clusters.length} Clusters — click to drill in</div>
+  const html = `
+    <div class="section" style="margin-top:0">
+      <div class="eye">Field performance · ${DATA.meta.month||''}</div>
+      <h2>PM Adherence & Completion</h2>
+      <p class="lead">PM due vs done, balance, run rate, and projected close across all clusters. Click any cluster card to drill into its detail.</p>
+
+      <div id="pma-top">${pmaTopHtml(G)}</div>
+
+      <!-- City multi-select + cluster cards grid -->
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:12px">
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+          <div style="position:relative">
+            <button id="pma-city-btn" style="display:inline-flex;align-items:center;gap:8px;padding:7px 14px;border:1.5px solid var(--line);border-radius:8px;background:#fff;color:var(--ink);font-size:12px;font-weight:600;cursor:pointer;font-family:inherit">
+              <span id="pma-city-label">All cities (${pmaAllCities.length})</span>
+              <span style="font-size:9px;color:var(--ink-4)">&#9660;</span>
+            </button>
+            <div id="pma-city-panel" style="display:none;position:absolute;z-index:60;top:calc(100% + 6px);left:0;width:270px;max-height:340px;overflow:auto;background:#fff;border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 28px rgba(26,35,126,.16);padding:10px">
+              <div style="display:flex;gap:6px;margin-bottom:8px;position:sticky;top:0;background:#fff;padding-bottom:6px">
+                <button id="pma-city-all"  style="flex:1;padding:5px;border:1px solid var(--line);border-radius:6px;background:#fff;font-size:10.5px;font-weight:600;cursor:pointer;font-family:inherit;color:var(--ink-2)">Select all</button>
+                <button id="pma-city-none" style="flex:1;padding:5px;border:1px solid var(--line);border-radius:6px;background:#fff;font-size:10.5px;font-weight:600;cursor:pointer;font-family:inherit;color:var(--ink-2)">Clear</button>
+              </div>
+              ${pmaAllCities.map(ct=>`
+                <label style="display:flex;align-items:center;gap:9px;padding:5px 6px;border-radius:6px;cursor:pointer;font-size:12px;color:var(--ink)">
+                  <input type="checkbox" class="pma-city-cb" value="${ct}" checked style="accent-color:var(--ss-navy);cursor:pointer">
+                  <span>${ct}</span>
+                </label>`).join('')}
+            </div>
+          </div>
+          <div id="pma-count" style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--ink-3)">${clusters.length} Clusters — click to drill in</div>
+        </div>
         <div style="display:flex;gap:8px;align-items:center">
           <span style="font-size:11px;color:var(--ink-4)">Sort:</span>
           ${['% done','balance','pmDue','runRate'].map(k=>
@@ -2190,7 +2242,7 @@ function renderPMAdherence() {
   let pmSortKey = '% done', pmSortAsc = true;
 
   function renderPMACards() {
-    const sorted = [...clusters].sort((a,b) => {
+    const sorted = [...pmaList()].sort((a,b) => {
       const getV = (c) => {
         if (pmSortKey==='% done')   return c.pmDue>0 ? c.pmDone/c.pmDue : 0;
         if (pmSortKey==='balance')  return Math.max(0,(c.pmDue||0)-(c.pmDone||0));
@@ -2301,6 +2353,46 @@ function renderPMAdherence() {
       else { pmSortKey = btn.dataset.k; pmSortAsc = pmSortKey==='% done'; }
       renderPMACards();
     });
+  });
+
+  // ── city multi-select wiring ──
+  function pmaRefresh() {
+    const n = pmaSel.size;
+    document.getElementById('pma-city-label').textContent =
+      n === 0 ? 'No cities selected'
+      : n === pmaAllCities.length ? `All cities (${n})`
+      : n <= 3 ? [...pmaSel].sort().join(', ')
+      : `${n} cities selected`;
+    document.getElementById('pma-count').textContent =
+      `${n} ${n===1?'Cluster':'Clusters'} — click to drill in`;
+    document.getElementById('pma-top').innerHTML = pmaTopHtml(pmaTotals(pmaList()));
+    renderPMACards();
+  }
+
+  const pmaBtn   = document.getElementById('pma-city-btn');
+  const pmaPanel = document.getElementById('pma-city-panel');
+  pmaBtn.addEventListener('click', e => {
+    e.stopPropagation();
+    pmaPanel.style.display = pmaPanel.style.display === 'none' ? 'block' : 'none';
+  });
+  pmaPanel.addEventListener('click', e => e.stopPropagation());
+  document.addEventListener('click', () => { const p = document.getElementById('pma-city-panel'); if (p) p.style.display = 'none'; });
+
+  document.querySelectorAll('.pma-city-cb').forEach(cb => {
+    cb.addEventListener('change', () => {
+      if (cb.checked) pmaSel.add(cb.value); else pmaSel.delete(cb.value);
+      pmaRefresh();
+    });
+  });
+  document.getElementById('pma-city-all').addEventListener('click', () => {
+    pmaSel = new Set(pmaAllCities);
+    document.querySelectorAll('.pma-city-cb').forEach(cb => cb.checked = true);
+    pmaRefresh();
+  });
+  document.getElementById('pma-city-none').addEventListener('click', () => {
+    pmaSel = new Set();
+    document.querySelectorAll('.pma-city-cb').forEach(cb => cb.checked = false);
+    pmaRefresh();
   });
 
   renderPMACards();
@@ -2475,7 +2567,306 @@ function renderPMACluster(clusterName) {
   `;
 }
 
-const RENDER = { overview: renderOverview, quadrant: renderQuadrant, clusters: renderClusters, shdaily: renderSHDaily, deepdive: renderDeepDive, cityiq: renderCityIQ, clustersh: renderClusterSH, pmadherence: renderPMAdherence };
+
+// ══════════════════════════════════════════════════════════════════════════════
+// SH — OVERALL  ·  best-performing Service Heroes across the whole universe
+// ══════════════════════════════════════════════════════════════════════════════
+let shOverallState = { cities: null, from: 1, to: 0, team: 'All', type: 'All', sortKey: 'visits', asc: false, minVisits: 10 };
+
+function renderSHOverall() {
+  const unified     = DATA.shDailyUnified || [];
+  const daysInMonth = DATA.meta.daysInMonth || 30;
+  const types       = DATA.meta.types || ['PM','CM','MAAS','B2B','Torque'];
+  const st          = shOverallState;
+  if (!st.to) st.to = daysInMonth;
+
+  if (!unified.length) {
+    document.getElementById('app').innerHTML =
+      '<div class="section" style="margin-top:0"><p style="color:var(--ink-3);padding:40px">No SH-level daily data available.</p></div>';
+    return;
+  }
+
+  const allCities = [...new Set(unified.map(r => r.cluster).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
+  if (!st.cities) st.cities = new Set(allCities);
+
+  // SH master lookup (cost / team / status)
+  const shMap = {};
+  (DATA.shLevel || []).forEach(r => {
+    const k = (r.empCode || r.name || '').toString().toLowerCase();
+    if (!k) return;
+    if (!shMap[k] || (r.totalCost||0) > (shMap[k].totalCost||0)) shMap[k] = r;
+  });
+
+  function buildRows() {
+    const from = Math.min(st.from, st.to), to = Math.max(st.from, st.to);
+    const winDays = to - from + 1;
+    const rows = [];
+
+    unified.forEach(r => {
+      if (!st.cities.has(r.cluster)) return;
+
+      let visits = 0, pm = 0, att = 0, peak = 0;
+      const daily = [];
+      for (let i = from - 1; i < to; i++) {
+        let dv = 0;
+        Object.keys(r.typeDays || {}).forEach(t => {
+          if (st.type !== 'All' && t !== st.type) return;
+          dv += (r.typeDays[t][i] || 0);
+        });
+        daily.push(dv);
+        visits += dv;
+        if (dv > 0) att++;
+        if (dv > peak) peak = dv;
+        if (r.typeDays && r.typeDays.PM) pm += (r.typeDays.PM[i] || 0);
+      }
+      if (visits <= 0) return;
+
+      const meta = shMap[(r.empCode||'').toLowerCase()] || shMap[(r.name||'').toLowerCase()] || {};
+      const team = meta.team || '—';
+      if (st.team !== 'All' && team !== st.team) return;
+
+      // pro-rate monthly cost across the selected window
+      const cost = (meta.totalCost || 0) * (winDays / daysInMonth);
+      const cpv  = visits > 0 && cost > 0 ? cost / visits : 0;
+
+      // consistency = attended days as a share of the window
+      const cons = winDays ? Math.round(att / winDays * 100) : 0;
+
+      rows.push({
+        name: r.name, empCode: r.empCode || '—', cluster: r.cluster,
+        team, status: meta.status || '—',
+        visits, pm, attDays: att, winDays,
+        vday: att ? visits / att : 0,
+        cons, peak, cpv, cost,
+        pmShare: visits ? Math.round(pm / visits * 100) : 0
+      });
+    });
+    return rows;
+  }
+
+  const sortDefs = [
+    { k:'visits',  label:'Total Visits',   hi:true  },
+    { k:'vday',    label:'Visits / Day',   hi:true  },
+    { k:'attDays', label:'Attended Days',  hi:true  },
+    { k:'cons',    label:'Consistency',    hi:true  },
+    { k:'cpv',     label:'CPV (lowest)',   hi:false },
+  ];
+
+  const dayOpts = (sel) => Array.from({length:daysInMonth},(_,i)=>i+1)
+    .map(d=>`<option value="${d}"${d===sel?' selected':''}>Day ${d}</option>`).join('');
+
+  document.getElementById('app').innerHTML = `
+    <div class="section" style="margin-top:0">
+      <div class="eye">Universe leaderboard · ${DATA.meta.month || ''}</div>
+      <h2>SH — Overall</h2>
+      <p class="lead">Top-performing Service Heroes across every city, ranked on volume, productivity, attendance, consistency and cost efficiency. Filter by city, date window, team or visit type to change the field.</p>
+
+      <!-- controls -->
+      <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end;margin-bottom:20px;padding:16px 18px;background:var(--bg);border:1px solid var(--line);border-radius:12px">
+
+        <div style="position:relative">
+          <div style="font-size:9.5px;text-transform:uppercase;letter-spacing:.1em;color:var(--ink-4);font-weight:700;margin-bottom:5px">City</div>
+          <button id="so-city-btn" style="display:inline-flex;align-items:center;gap:8px;padding:7px 14px;border:1.5px solid var(--line);border-radius:8px;background:#fff;color:var(--ink);font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;min-width:180px;justify-content:space-between">
+            <span id="so-city-label">All cities (${allCities.length})</span><span style="font-size:9px;color:var(--ink-4)">&#9660;</span>
+          </button>
+          <div id="so-city-panel" style="display:none;position:absolute;z-index:60;top:calc(100% + 6px);left:0;width:260px;max-height:320px;overflow:auto;background:#fff;border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 28px rgba(26,35,126,.16);padding:10px">
+            <div style="display:flex;gap:6px;margin-bottom:8px;position:sticky;top:0;background:#fff;padding-bottom:6px">
+              <button id="so-city-all"  style="flex:1;padding:5px;border:1px solid var(--line);border-radius:6px;background:#fff;font-size:10.5px;font-weight:600;cursor:pointer;font-family:inherit;color:var(--ink-2)">Select all</button>
+              <button id="so-city-none" style="flex:1;padding:5px;border:1px solid var(--line);border-radius:6px;background:#fff;font-size:10.5px;font-weight:600;cursor:pointer;font-family:inherit;color:var(--ink-2)">Clear</button>
+            </div>
+            ${allCities.map(ct=>`<label style="display:flex;align-items:center;gap:9px;padding:5px 6px;border-radius:6px;cursor:pointer;font-size:12px;color:var(--ink)">
+              <input type="checkbox" class="so-city-cb" value="${ct}"${st.cities.has(ct)?' checked':''} style="accent-color:var(--ss-navy);cursor:pointer"><span>${ct}</span></label>`).join('')}
+          </div>
+        </div>
+
+        <div>
+          <div style="font-size:9.5px;text-transform:uppercase;letter-spacing:.1em;color:var(--ink-4);font-weight:700;margin-bottom:5px">From</div>
+          <select id="so-from" style="padding:7px 12px;border:1.5px solid var(--line);border-radius:8px;background:#fff;font-size:12px;font-weight:600;font-family:inherit;color:var(--ink);cursor:pointer">${dayOpts(st.from)}</select>
+        </div>
+        <div>
+          <div style="font-size:9.5px;text-transform:uppercase;letter-spacing:.1em;color:var(--ink-4);font-weight:700;margin-bottom:5px">To</div>
+          <select id="so-to" style="padding:7px 12px;border:1.5px solid var(--line);border-radius:8px;background:#fff;font-size:12px;font-weight:600;font-family:inherit;color:var(--ink);cursor:pointer">${dayOpts(st.to)}</select>
+        </div>
+        <div>
+          <div style="font-size:9.5px;text-transform:uppercase;letter-spacing:.1em;color:var(--ink-4);font-weight:700;margin-bottom:5px">Visit type</div>
+          <select id="so-type" style="padding:7px 12px;border:1.5px solid var(--line);border-radius:8px;background:#fff;font-size:12px;font-weight:600;font-family:inherit;color:var(--ink);cursor:pointer">
+            <option value="All"${st.type==='All'?' selected':''}>All types</option>
+            ${types.map(t=>`<option value="${t}"${st.type===t?' selected':''}>${t}</option>`).join('')}
+          </select>
+        </div>
+        <div>
+          <div style="font-size:9.5px;text-transform:uppercase;letter-spacing:.1em;color:var(--ink-4);font-weight:700;margin-bottom:5px">Team</div>
+          <select id="so-team" style="padding:7px 12px;border:1.5px solid var(--line);border-radius:8px;background:#fff;font-size:12px;font-weight:600;font-family:inherit;color:var(--ink);cursor:pointer">
+            ${['All','B2C','B2B','Assure'].map(t=>`<option value="${t}"${st.team===t?' selected':''}>${t==='All'?'All teams':t}</option>`).join('')}
+          </select>
+        </div>
+        <div>
+          <div style="font-size:9.5px;text-transform:uppercase;letter-spacing:.1em;color:var(--ink-4);font-weight:700;margin-bottom:5px">Min visits</div>
+          <select id="so-min" style="padding:7px 12px;border:1.5px solid var(--line);border-radius:8px;background:#fff;font-size:12px;font-weight:600;font-family:inherit;color:var(--ink);cursor:pointer">
+            ${[0,5,10,25,50].map(n=>`<option value="${n}"${st.minVisits===n?' selected':''}>${n===0?'No floor':n+'+'}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+
+      <!-- rank-by -->
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:16px">
+        <span style="font-size:11.5px;font-weight:600;color:var(--ink-3);text-transform:uppercase;letter-spacing:.08em">Rank by</span>
+        ${sortDefs.map(s=>`<button class="so-sort" data-k="${s.k}" style="padding:5px 14px;border:1px solid var(--line);border-radius:16px;background:#fff;color:var(--ink-3);font-size:11.5px;font-weight:600;cursor:pointer;font-family:inherit">${s.label}</button>`).join('')}
+      </div>
+
+      <div id="so-podium" style="margin-bottom:20px"></div>
+      <div id="so-body"></div>
+    </div>
+  `;
+
+  function render() {
+    const rows = buildRows().filter(r => r.visits >= st.minVisits);
+    const def  = sortDefs.find(s => s.k === st.sortKey) || sortDefs[0];
+
+    // for CPV, zero means "no cost data" — push those to the bottom rather than the top
+    const val = r => st.sortKey === 'cpv' ? (r.cpv > 0 ? r.cpv : Infinity) : (r[st.sortKey] || 0);
+    const sorted = [...rows].sort((a,b) => st.asc ? val(a)-val(b) : val(b)-val(a));
+    if (st.sortKey === 'cpv' && !st.asc) sorted.reverse(); // lowest CPV = best
+
+    document.querySelectorAll('.so-sort').forEach(b => {
+      const active = b.dataset.k === st.sortKey;
+      b.style.background  = active ? 'var(--ss-navy)' : '#fff';
+      b.style.color       = active ? '#fff' : 'var(--ink-3)';
+      b.style.borderColor = active ? 'var(--ss-navy)' : 'var(--line)';
+    });
+
+    if (!sorted.length) {
+      document.getElementById('so-podium').innerHTML = '';
+      document.getElementById('so-body').innerHTML =
+        '<p style="color:var(--ink-3);padding:30px 0">No Service Heroes match these filters.</p>';
+      return;
+    }
+
+    // ── podium: top 3 ──
+    const medal = ['🥇','🥈','🥉'];
+    document.getElementById('so-podium').innerHTML =
+      `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px">` +
+      sorted.slice(0,3).map((r,i) => `
+        <div style="background:#fff;border:1.5px solid ${i===0?'var(--ss-amber)':'var(--line)'};border-radius:12px;padding:16px 18px;box-shadow:0 2px 10px rgba(26,35,126,.07)">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">
+            <div style="min-width:0">
+              <div style="font-size:14px;font-weight:800;color:var(--ss-navy);white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${r.name}">${r.name}</div>
+              <div style="font-size:10.5px;color:var(--ink-3);margin-top:2px">${r.cluster} · ${r.team} · ${r.empCode}</div>
+            </div>
+            <div style="font-size:22px;line-height:1">${medal[i]}</div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 12px">
+            ${[['Visits', inr(r.visits)], ['Att. days', `${r.attDays}/${r.winDays}`],
+               ['V/Day', r.vday.toFixed(1)], ['CPV', r.cpv>0?'₹'+inr(r.cpv):'—']]
+              .map(([l,v])=>`<div>
+                <div style="font-size:9px;text-transform:uppercase;letter-spacing:.1em;color:var(--ink-4)">${l}</div>
+                <div style="font-size:15px;font-weight:700;color:var(--ink)">${v}</div>
+              </div>`).join('')}
+          </div>
+        </div>`).join('') + `</div>`;
+
+    // ── leaderboard table ──
+    const maxV = Math.max(...sorted.map(r => r.visits), 1);
+    const shown = sorted.slice(0, 50);
+
+    const head = ['#','Service Hero','EMP','City','Team','Visits','Att. Days','V/Day','Consist.','PM %','CPV'];
+    const w    = ['32px','170px','66px','92px','54px','1fr','66px','52px','62px','48px','66px'];
+
+    document.getElementById('so-body').innerHTML = `
+      <div class="card" style="padding:20px;overflow-x:auto">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:12px">
+          <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.12em;color:var(--ink-3)">
+            Leaderboard · ranked by ${def.label}
+          </div>
+          <div style="font-size:10.5px;color:var(--ink-4)">
+            ${inr(rows.length)} SHs match · showing top ${shown.length} · days ${Math.min(st.from,st.to)}–${Math.max(st.from,st.to)}
+          </div>
+        </div>
+
+        <div style="min-width:940px">
+          <div style="display:flex;align-items:center;gap:8px;padding:0 0 7px;border-bottom:1px solid var(--line);margin-bottom:4px">
+            ${head.map((h,i)=>`<div style="width:${w[i]};${w[i]==='1fr'?'flex:1;':''}font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-4)">${h}</div>`).join('')}
+          </div>
+          ${shown.map((r,i) => {
+            const bw = Math.round(r.visits / maxV * 100);
+            const consCol = r.cons>=80?'var(--good)':r.cons>=50?'var(--ink-2)':'var(--danger)';
+            const teamBg  = (r.team||'').toLowerCase()==='b2b' ? 'var(--b2b-soft)' : 'var(--good-soft)';
+            const teamFg  = (r.team||'').toLowerCase()==='b2b' ? 'var(--b2b)' : 'var(--good)';
+            return `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--line)">
+              <div style="width:32px;font-size:11px;font-weight:700;color:${i<3?'var(--ss-amber)':'var(--ink-4)'}">${i+1}</div>
+              <div style="width:170px;font-size:12px;font-weight:600;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${r.name}">${r.name}</div>
+              <div style="width:66px;font-size:10px;color:var(--ink-4);font-family:'JetBrains Mono',monospace;white-space:nowrap;overflow:hidden">${r.empCode}</div>
+              <div style="width:92px;font-size:11px;color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${r.cluster}</div>
+              <div style="width:54px"><span style="font-size:9.5px;font-weight:600;color:${teamFg};padding:2px 6px;background:${teamBg};border-radius:4px">${r.team}</span></div>
+              <div style="flex:1;display:flex;align-items:center;gap:8px;min-width:120px">
+                <div style="flex:1;height:7px;background:var(--bg-2);border-radius:4px;overflow:hidden">
+                  <div style="height:100%;width:${bw}%;background:var(--ss-navy);border-radius:4px"></div>
+                </div>
+                <div style="font-size:12px;font-weight:700;color:var(--ink);width:38px;text-align:right">${inr(r.visits)}</div>
+              </div>
+              <div style="width:66px;font-size:11.5px;font-weight:600;color:var(--ink-2)">${r.attDays}<span style="font-size:9px;color:var(--ink-4)">/${r.winDays}</span></div>
+              <div style="width:52px;font-size:12px;font-weight:700;color:var(--ink)">${r.vday.toFixed(1)}</div>
+              <div style="width:62px;font-size:11.5px;font-weight:600;color:${consCol}">${r.cons}%</div>
+              <div style="width:48px;font-size:11px;color:var(--ink-3)">${r.pmShare}%</div>
+              <div style="width:66px;font-size:11.5px;font-weight:600;color:var(--ink-2)">${r.cpv>0?'₹'+inr(r.cpv):'—'}</div>
+            </div>`;
+          }).join('')}
+        </div>
+        <p style="font-size:10.5px;color:var(--ink-4);margin-top:12px">
+          Att. Days = days in the window with at least one visit. V/Day = visits ÷ attended days.
+          Consistency = attended days as a share of the window. CPV pro-rates monthly SH cost to the selected window; blank where cost isn't mapped.
+        </p>
+      </div>`;
+  }
+
+  // ── wiring ──
+  function soRefresh() {
+    const n = st.cities.size;
+    document.getElementById('so-city-label').textContent =
+      n === 0 ? 'No cities selected'
+      : n === allCities.length ? `All cities (${n})`
+      : n <= 2 ? [...st.cities].sort().join(', ')
+      : `${n} cities selected`;
+    render();
+  }
+
+  const soBtn = document.getElementById('so-city-btn');
+  const soPan = document.getElementById('so-city-panel');
+  soBtn.addEventListener('click', e => { e.stopPropagation(); soPan.style.display = soPan.style.display==='none'?'block':'none'; });
+  soPan.addEventListener('click', e => e.stopPropagation());
+  document.addEventListener('click', () => { const p=document.getElementById('so-city-panel'); if(p) p.style.display='none'; });
+
+  document.querySelectorAll('.so-city-cb').forEach(cb => cb.addEventListener('change', () => {
+    if (cb.checked) st.cities.add(cb.value); else st.cities.delete(cb.value);
+    soRefresh();
+  }));
+  document.getElementById('so-city-all').addEventListener('click', () => {
+    st.cities = new Set(allCities);
+    document.querySelectorAll('.so-city-cb').forEach(cb => cb.checked = true);
+    soRefresh();
+  });
+  document.getElementById('so-city-none').addEventListener('click', () => {
+    st.cities = new Set();
+    document.querySelectorAll('.so-city-cb').forEach(cb => cb.checked = false);
+    soRefresh();
+  });
+
+  document.getElementById('so-from').addEventListener('change', e => { st.from = +e.target.value; render(); });
+  document.getElementById('so-to')  .addEventListener('change', e => { st.to   = +e.target.value; render(); });
+  document.getElementById('so-type').addEventListener('change', e => { st.type = e.target.value;  render(); });
+  document.getElementById('so-team').addEventListener('change', e => { st.team = e.target.value;  render(); });
+  document.getElementById('so-min') .addEventListener('change', e => { st.minVisits = +e.target.value; render(); });
+
+  document.querySelectorAll('.so-sort').forEach(b => b.addEventListener('click', () => {
+    if (st.sortKey === b.dataset.k) st.asc = !st.asc;
+    else { st.sortKey = b.dataset.k; st.asc = false; }
+    render();
+  }));
+
+  soRefresh();
+}
+
+const RENDER = { overview: renderOverview, quadrant: renderQuadrant, clusters: renderClusters, shdaily: renderSHDaily, deepdive: renderDeepDive, cityiq: renderCityIQ, clustersh: renderClusterSH, pmadherence: renderPMAdherence, shoverall: renderSHOverall };
 let currentTab = "overview";
 
 function switchTab(name) {
