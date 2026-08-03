@@ -283,6 +283,7 @@ tbody tr:last-child td{border-bottom:0}
       <div class="month-tabs" role="tablist" id="month-tabs">
         <button class="month-tab active" data-month="june">June</button>
         <button class="month-tab" data-month="july">July</button>
+        <button class="month-tab" data-month="august">August</button>
       </div>
       <div class="tabs" role="tablist">
         <button class="tab active" data-tab="overview">B2C Overview</button>
@@ -320,7 +321,8 @@ tbody tr:last-child td{border-bottom:0}
 // Until you do, the dashboard renders from embedded sample data.
 const MONTH_URLS = {
   june: "https://script.google.com/macros/s/AKfycbz4Aj5Pg9EBDm2K_K6XJWyFmGa9MGS8PDDTigU3x0bL4Zb9rptZrkAdk86icVqPRwzU/exec",
-  july: "https://script.google.com/macros/s/AKfycbw1kvdQFbjLmGepQvUAL4vBUW21kAMohO98Hzegyw9pLngnpGlV1nathvmq6bwhEpeS/exec"
+  july: "https://script.google.com/macros/s/AKfycbw1kvdQFbjLmGepQvUAL4vBUW21kAMohO98Hzegyw9pLngnpGlV1nathvmq6bwhEpeS/exec",
+  august: "https://script.google.com/macros/s/AKfycbwdg3hFKOTriQCzp7V_cMwCu_yESFJxUcGm-Qh0-nyJyFjYf7uXDm2-Y70iMhi4eLv4/exec"
 };
 let currentMonthKey = "june";
 const WEB_APP_URL = MONTH_URLS[currentMonthKey];   // ← kept for backward-compat with any code referencing it
