@@ -364,11 +364,10 @@ async function loadData(monthKey) {
     setStatus("LIVE", "as of " + (json.meta && json.meta.asOf ? new Date(json.meta.asOf).toLocaleString() : "now"), false);
   } catch (e) {
     DATA = FALLBACK_DATA;
-    dataCache[monthKey] = DATA;
-    setStatus("OFFLINE", "fetch failed — showing fallback", true);
-    console.error(e);
+    // Do NOT cache failed fetches — allow retry on next click
+    setStatus("OFFLINE", "fetch failed: " + e.message + " — showing June fallback", true);
+    console.error("August fetch error:", e);
   }
-}
 
 function setStatus(text, detail, isOffline) {
   document.getElementById("status-dot").classList.toggle("off", !!isOffline);
