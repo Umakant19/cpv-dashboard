@@ -283,7 +283,6 @@ tbody tr:last-child td{border-bottom:0}
       <div class="month-tabs" role="tablist" id="month-tabs">
         <button class="month-tab active" data-month="june">June</button>
         <button class="month-tab" data-month="july">July</button>
-        <button class="month-tab" data-month="august">August</button>
       </div>
       <div class="tabs" role="tablist">
         <button class="tab active" data-tab="overview">B2C Overview</button>
@@ -321,8 +320,7 @@ tbody tr:last-child td{border-bottom:0}
 // Until you do, the dashboard renders from embedded sample data.
 const MONTH_URLS = {
   june: "https://script.google.com/macros/s/AKfycbz4Aj5Pg9EBDm2K_K6XJWyFmGa9MGS8PDDTigU3x0bL4Zb9rptZrkAdk86icVqPRwzU/exec",
-  july: "https://script.google.com/macros/s/AKfycbw1kvdQFbjLmGepQvUAL4vBUW21kAMohO98Hzegyw9pLngnpGlV1nathvmq6bwhEpeS/exec",
-  August:"https://script.google.com/macros/s/AKfycbwdg3hFKOTriQCzp7V_cMwCu_yESFJxUcGm-Qh0-nyJyFjYf7uXDm2-Y70iMhi4eLv4/exec"
+  july: "https://script.google.com/macros/s/AKfycbw1kvdQFbjLmGepQvUAL4vBUW21kAMohO98Hzegyw9pLngnpGlV1nathvmq6bwhEpeS/exec"
 };
 let currentMonthKey = "june";
 const WEB_APP_URL = MONTH_URLS[currentMonthKey];   // ← kept for backward-compat with any code referencing it
@@ -364,10 +362,11 @@ async function loadData(monthKey) {
     setStatus("LIVE", "as of " + (json.meta && json.meta.asOf ? new Date(json.meta.asOf).toLocaleString() : "now"), false);
   } catch (e) {
     DATA = FALLBACK_DATA;
-    // Do NOT cache failed fetches — allow retry on next click
-    setStatus("OFFLINE", "fetch failed: " + e.message + " — showing June fallback", true);
-    console.error("August fetch error:", e);
+    dataCache[monthKey] = DATA;
+    setStatus("OFFLINE", "fetch failed — showing fallback", true);
+    console.error(e);
   }
+}
 
 function setStatus(text, detail, isOffline) {
   document.getElementById("status-dot").classList.toggle("off", !!isOffline);
