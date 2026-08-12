@@ -350,31 +350,71 @@ async function loadData(monthKey) {
     setStatus("NOT CONFIGURED", "no web app URL for " + monthKey, true);
     return false;
   }
-  try {
-    setStatus("LOADING…", "fetching from sheet", false);
-    const res = await fetch(url, { redirect: "follow" });
-    if (!res.ok) throw new Error("HTTP " + res.status);
-    const json = await res.json();
-    if (json.error) throw new Error(json.error);
-    DATA = json;
-    dataCache[monthKey] = DATA;
-    setStatus("LIVE", "as of " + (json.meta && json.meta.asOf ? new Date(json.meta.asOf).toLocaleString() : "now"), false);
-    return true;
-  } catch (e) {
-    DATA = null;
-    setStatus("OFFLINE", "fetch failed — " + (e && e.message ? e.message : "unknown error"), true);
-    console.error(e);
-    return false;
+
+  // Apps Script cold-starts can take 30s+ and throws occasional 429/500s,
+  // so give each attempt a long timeout and retry with backoff.
+  const ATTEMPTS = 3, TIMEOUT_MS = 60000, BACKOFF = [1500, 4000];
+  let lastErr = null;
+
+  for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
+    setStatus(attempt === 1 ? "LOADING…" : "RETRYING…",
+              attempt === 1 ? "fetching from sheet (can take up to a minute)"
+                            : "attempt " + attempt + " of " + ATTEMPTS, false);
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
+    try {
+      const res = await fetch(url + "?cb=" + Date.now(), { redirect: "follow", signal: ctrl.signal, cache: "no-store" });
+      clearTimeout(timer);
+      if (!res.ok) throw new Error("HTTP " + res.status + (res.status === 429 ? " (rate limited)" : ""));
+      const text = await res.text();
+      let json;
+      try { json = JSON.parse(text); }
+      catch (_) { throw new Error(/<html/i.test(text) ? "got an HTML page, not JSON — check deployment access" : "invalid JSON response"); }
+      if (json.error) throw new Error(json.error);
+      DATA = json;
+      dataCache[monthKey] = json;
+      setStatus("LIVE", "as of " + (json.meta && json.meta.asOf ? new Date(json.meta.asOf).toLocaleString() : "now")
+                        + (attempt > 1 ? " · loaded on attempt " + attempt : ""), false);
+      return true;
+    } catch (e) {
+      clearTimeout(timer);
+      lastErr = (e && e.name === "AbortError") ? new Error("timed out after " + (TIMEOUT_MS / 1000) + "s") : e;
+      console.warn("loadData attempt " + attempt + " failed:", lastErr.message);
+      if (attempt < ATTEMPTS) await new Promise(r => setTimeout(r, BACKOFF[attempt - 1]));
+    }
   }
+
+  DATA = null;
+  lastLoadError = lastErr && lastErr.message ? lastErr.message : "unknown error";
+  setStatus("OFFLINE", "failed after " + ATTEMPTS + " attempts — " + lastLoadError, true);
+  return false;
+}
+
+let lastLoadError = "";
+
+async function retryLoad(monthKey) {
+  document.getElementById("app").innerHTML = `<div class="loading"><span class="spin"></span>Loading data…</div>`;
+  const ok = await loadData(monthKey);
+  if (!ok) { showLoadError(monthKey); return; }
+  renderHeader();
+  destroyCharts();
+  RENDER[currentTab]();
 }
 
 function showLoadError(monthKey) {
   document.getElementById("app").innerHTML =
-    '<div class="loading" style="flex-direction:column;gap:10px;text-align:center">' +
-    '<div style="font-weight:600">Could not load ' + monthKey + ' data</div>' +
-    '<div style="font-size:12px;opacity:.7">The Apps Script web app did not respond. Check the deployment URL / sharing settings, then reload.</div>' +
+    '<div class="loading" style="flex-direction:column;gap:12px;text-align:center">' +
+    '<div style="font-weight:600;font-size:15px">Could not load ' + monthKey + ' data</div>' +
+    '<div style="font-size:12px;opacity:.75;max-width:460px;line-height:1.6">' +
+      (lastLoadError ? 'Error: <code>' + lastLoadError + '</code><br>' : '') +
+      'The Apps Script web app did not respond in time. This is usually a slow cold start \u2014 retrying often works.' +
+    '</div>' +
+    '<button id="retry-btn" class="month-tab" style="cursor:pointer">Retry now</button>' +
     '</div>';
+  const b = document.getElementById("retry-btn");
+  if (b) b.addEventListener("click", () => retryLoad(monthKey));
 }
+
 
 function setStatus(text, detail, isOffline) {
   document.getElementById("status-dot").classList.toggle("off", !!isOffline);
@@ -395,6 +435,52 @@ const inrShort = n => {
 };
 const pct = (a, b) => (b ? (a / b * 100).toFixed(1) : "0") + "%";
 const round = (n, d=0) => +(+n || 0).toFixed(d);
+
+// ── NEW HIRE COST (NHC) ───────────────────────────────────────────────
+// Emitted by WebApp.gs as `newHireCost` on each cluster and on totals.
+// Logic (mirrors CPV Automation calcNewHireCost): 14-day window from DOJ
+// (DOJ..DOJ+13) overlapping the payload month, full salary, no proration,
+// excluded if the SH exited within 10 days of joining.
+// Every reader below degrades to 0 / "—" when the field is absent, so the
+// dashboard keeps working against an un-patched web app.
+const nhcOf      = o => (o && +o.newHireCost) || 0;
+const totalsNHC  = () => (+((DATA.totals||{}).newHireCost)) || (DATA.clusters||[]).reduce((s,c)=>s+nhcOf(c),0);
+const hasNHC     = () => totalsNHC() > 0;
+// NHC per visit — how many rupees of each visit's cost is new-hire spend
+const nhcCpvOf   = (nhc, visits) => (visits > 0 ? nhc / visits : 0);
+const fmtNhcCpv  = (nhc, visits) => (visits > 0 && nhc > 0 ? "\u20B9" + inr(Math.round(nhc / visits)) : "\u2014");
+
+// ── MONTH PROGRESS + PM PROJECTION ────────────────────────────────────
+// Elapsed days come from meta.asOf (the sheet's own as-of date), so the
+// projection matches the data rather than the viewer's clock.
+function monthProgress() {
+  const dim = DATA.meta && DATA.meta.daysInMonth ? +DATA.meta.daysInMonth : 30;
+  let elapsed = dim;
+  const asOf = DATA.meta && DATA.meta.asOf ? new Date(DATA.meta.asOf) : null;
+  if (asOf && !isNaN(asOf.getTime())) elapsed = asOf.getDate();
+  elapsed = Math.max(1, Math.min(elapsed, dim));
+  return { daysInMonth: dim, elapsed: elapsed, remaining: Math.max(0, dim - elapsed) };
+}
+
+// Projects month-end PM completion from the run rate achieved so far.
+function pmProjection(due, done) {
+  const mp = monthProgress();
+  due = +due || 0; done = +done || 0;
+  const perDay      = done / mp.elapsed;                       // PM per calendar day so far
+  const projected   = done + perDay * mp.remaining;            // where the month lands
+  const projPending = Math.max(0, due - projected);            // PM still open at month end
+  const balance     = Math.max(0, due - done);
+  const reqPerDay   = mp.remaining > 0 ? balance / mp.remaining : (balance > 0 ? Infinity : 0);
+  const gapPerDay   = reqPerDay === Infinity ? Infinity : reqPerDay - perDay;
+  return {
+    ...mp, due, done, perDay, projected, projPending, balance, reqPerDay, gapPerDay,
+    projPct   : due > 0 ? projected / due * 100 : 0,
+    donePct   : due > 0 ? done / due * 100 : 0,
+    onTrack   : projPending <= 0 && due > 0,
+    // how much the rate must lift, e.g. 1.35 = needs 35% more per day
+    liftNeeded: perDay > 0 && reqPerDay !== Infinity ? reqPerDay / perDay : null,
+  };
+}
 
 // ── DOJ / System Days helpers ────────────────────────────────────────────────
 const DOJ_MONTHS = {Jan:0,Feb:1,Mar:2,Apr:3,May:4,Jun:5,Jul:6,Aug:7,Sep:8,Oct:9,Nov:10,Dec:11};
@@ -613,6 +699,29 @@ function renderOverview() {
       <div class="stack">${seg(allParts, consolCost)}</div>
       <div class="stack-legend">${legend(allParts, consolCost)}</div>
     </div>
+    ${(() => {
+      const nhc = totalsNHC();
+      const nhcShare = consolCost ? nhc / consolCost * 100 : 0;
+      const newSH = T.newSH || DATA.clusters.reduce((s,c)=>s+(c.newSH||0),0);
+      if (!nhc) return `
+        <div style="margin-top:14px;padding:12px 16px;border:1px dashed var(--line);border-radius:9px;font-size:11.5px;color:var(--ink-4)">
+          New hire cost is not in this payload — add <code>newHireCost</code> to the WebApp.gs response to light up this row.
+        </div>`;
+      return `
+      <div class="card" style="margin-top:18px;padding:16px 20px;border-left:4px solid var(--ss-amber)">
+        <div style="margin-bottom:12px">
+          <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--ink-3)">New hire cost — sits inside salary, not an extra component</div>
+          <div style="font-size:11px;color:var(--ink-4);margin-top:3px">${inr(newSH)} SH${newSH===1?'':'s'} in their first 14 days from DOJ · full salary, no proration · exits within 10 days excluded</div>
+        </div>
+        <div class="grid-4">
+          <div class="cost-tile"><div class="lbl">New hire cost</div><div class="val"><span class="cur">₹</span>${inrShort(nhc)}</div><div class="pct">${nhcShare.toFixed(1)}% of total cost</div><div class="bar-track"><i style="width:${Math.min(100,nhcShare).toFixed(1)}%;background:var(--ss-amber)"></i></div></div>
+          <div class="cost-tile"><div class="lbl">NHC per visit</div><div class="val"><span class="cur">₹</span>${inr(Math.round(nhcCpvOf(nhc, totalVisits)))}</div><div class="pct">of ₹${inr(T.cpvBlended)} blended CPV</div><div class="bar-track"><i style="width:${T.cpvBlended?Math.min(100,nhcCpvOf(nhc,totalVisits)/T.cpvBlended*100).toFixed(1):0}%;background:var(--ss-amber)"></i></div></div>
+          <div class="cost-tile"><div class="lbl">NHC share of salary</div><div class="val">${pct(nhc, T.salaryCost||0)}</div><div class="pct">of ₹${inrShort(T.salaryCost||0)} salary</div></div>
+          <div class="cost-tile"><div class="lbl">Clusters hiring</div><div class="val">${DATA.clusters.filter(c=>nhcOf(c)>0).length}</div><div class="pct">of ${DATA.clusters.length} carry new-hire cost</div></div>
+        </div>
+      </div>`;
+    })()}
+
     <div class="grid-6" style="margin-top:18px">
       ${allParts.map(p => {
         const pv = consolCost ? (p.v/consolCost*100) : 0;
@@ -862,6 +971,8 @@ function renderClusters() {
               <th data-k="schedulerCost">Sched</th>
               <th data-k="bikeCost">Bike</th>
               <th data-k="totalCost">Total cost</th>
+              <th data-k="newHireCost">New hire cost</th>
+              <th data-k="nhcCpv">NHC / visit</th>
               <th data-k="vDayPM">V/Day PM</th>
               <th data-k="vDayBlended">V/Day Bld</th>
               <th data-k="cpvPM">CPV·PM</th>
@@ -898,6 +1009,9 @@ function renderTblBody() {
     totalVisits: Math.max(...DATA.clusters.map(c => c.totalVisits || 0), 1),
   };
 
+  // precompute NHC per visit so the column sorts like any other key
+  DATA.clusters.forEach(c => { c.nhcCpv = Math.round(nhcCpvOf(nhcOf(c), c.totalVisits || 0)); });
+
   const filtered = DATA.clusters.filter(c => c.cluster.toLowerCase().includes(tblState.q));
   filtered.sort((a, b) => {
     let va = a[tblState.sort], vb = b[tblState.sort];
@@ -922,6 +1036,8 @@ function renderTblBody() {
       <td>₹${inrShort(c.schedulerCost||0)}</td>
       <td>₹${inrShort(c.bikeCost||0)}</td>
       <td>₹${inr(c.totalCost||0)}${bar(c.totalCost||0, max.totalCost)}</td>
+      <td>${nhcOf(c) > 0 ? "₹" + inrShort(nhcOf(c)) : "—"}</td>
+      <td>${c.nhcCpv > 0 ? `<span class="chip">₹${inr(c.nhcCpv)}</span>` : "—"}</td>
       <td>${(c.vDayPM||0).toFixed(2)}</td>
       <td>${(c.vDayBlended||0).toFixed(2)}</td>
       <td>${c.cpvPM > 0 ? "₹" + inr(c.cpvPM) : "—"}</td>
@@ -951,6 +1067,8 @@ function renderTblBody() {
     <td>₹${inrShort(sum('schedulerCost'))}</td>
     <td>₹${inrShort(sum('bikeCost'))}</td>
     <td>₹${inr(tCost)}</td>
+    <td>${sum('newHireCost') > 0 ? "₹" + inrShort(sum('newHireCost')) : "—"}</td>
+    <td>${sum('newHireCost') > 0 && sum('totalVisits') > 0 ? "₹" + inr(Math.round(sum('newHireCost')/sum('totalVisits'))) : "—"}</td>
     <td>${vdayPM.toFixed(2)}</td>
     <td>${vdayBld.toFixed(2)}</td>
     <td>₹${inr(cpvPM)}</td>
@@ -1471,6 +1589,10 @@ function redrawCityIQ() {
     const cost = (meta.totalCost||0) * frac;
     const cpv  = visits > 0 ? Math.round(cost/visits) : 0;
 
+    // new hire cost — prorated to the same window as cost, then per visit
+    const nhc    = nhcOf(meta) * frac;
+    const nhcCpv = visits > 0 ? Math.round(nhc/visits) : 0;
+
     // pm%
     let pmV = 0;
     if (c.byTypeDay && c.byTypeDay['PM']) {
@@ -1478,7 +1600,7 @@ function redrawCityIQ() {
     }
     const pmPct = visits > 0 ? Math.round(pmV/visits*100) : 0;
 
-    return { cluster:c.cluster, visits, shs, vday, visPerDay, cpv, peak, cons, pmPct, spark, cost };
+    return { cluster:c.cluster, visits, shs, vday, visPerDay, cpv, peak, cons, pmPct, spark, cost, nhc, nhcCpv };
   }
 
   const allCities = cityData.map(buildCity).filter(c => c.visits > 0);
@@ -1495,6 +1617,7 @@ function redrawCityIQ() {
   const maxVisits = Math.max(...allCities.map(c=>c.visits),1);
   const maxVday   = Math.max(...allCities.map(c=>c.vday),1);
   const maxCpv    = Math.max(...allCities.filter(c=>c.cpv>0).map(c=>c.cpv),1);
+  const maxNhcCpv = Math.max(...allCities.map(c=>c.nhcCpv||0),1);
 
   if (st.selected === 'ALL') {
     // ── CITY CARD GRID ────────────────────────────────────────────────────
@@ -1512,6 +1635,7 @@ function redrawCityIQ() {
       { k:'pmPct',     label:'PM%' },
       { k:'visPerDay', label:'Vis/Day' },
       { k:'peak',      label:'Peak Day' },
+      { k:'nhcCpv',    label:'NHC/Visit' },
     ];
 
     const totalVisits = allCities.reduce((s,c)=>s+c.visits,0);
@@ -1546,6 +1670,11 @@ function redrawCityIQ() {
           <div class="cost-tile" style="flex:1;min-width:160px"><div class="lbl">Avg CPV (window)</div><div class="val">₹${inr(avgCpv)}</div><div class="pct">median ₹${inr(medCpv)}</div></div>
           <div class="cost-tile" style="flex:1;min-width:160px"><div class="lbl">Avg consistency</div><div class="val">${Math.round(avgCons)}%</div><div class="pct">median ${medCons}%</div></div>
           <div class="cost-tile" style="flex:1;min-width:160px"><div class="lbl">Total visits</div><div class="val">${inr(totalVisits)}</div><div class="pct">${st.type} · days ${from}–${to}</div></div>
+          ${(() => {
+            const totNhc = allCities.reduce((s,c)=>s+c.nhc,0);
+            const avgNhcCpv = totalVisits > 0 ? Math.round(totNhc/totalVisits) : 0;
+            return `<div class="cost-tile" style="flex:1;min-width:160px"><div class="lbl">Avg NHC / visit</div><div class="val">${totNhc>0?'₹'+inr(avgNhcCpv):'—'}</div><div class="pct">${totNhc>0?'₹'+inrShort(totNhc)+' new-hire cost':'needs newHireCost in payload'}</div></div>`;
+          })()}
         </div>`;
 
       const cardsHtml = sorted.map((c, rank) => {
@@ -1657,6 +1786,13 @@ function redrawCityIQ() {
                 <div style="font-size:17px;font-weight:700;color:var(--ink)">${inr(c.visits)}</div>
                 ${metricBar(c.visits, maxVisits, 'var(--ss-amber)')}
               </div>
+
+              ${c.nhc > 0 ? `
+              <div>
+                <div style="font-size:9.5px;text-transform:uppercase;letter-spacing:.1em;color:var(--ink-4)">NHC / Visit</div>
+                <div style="font-size:17px;font-weight:700;color:${c.nhcCpv > maxNhcCpv*0.6 ? 'var(--warn)' : 'var(--ink)'}">₹${inr(c.nhcCpv)}</div>
+                ${metricBar(c.nhcCpv, maxNhcCpv, 'var(--ss-amber)')}
+              </div>` : ''}
 
             </div>
 
@@ -1978,6 +2114,11 @@ function redrawClusterSH() {
   const vNoMaster = rows.filter(r => r.group === 'no_master').reduce((s,r)=>s+(r.total||0),0);
   const vTotal    = vActive + vInactive + vNoMaster;
 
+  // New hire cost for this cluster — per-SH if WebApp.gs sends it on shLevel
+  // (so it respects the EMP filter), else the cluster-level figure.
+  const shNHC  = rows.reduce((s,r) => s + nhcOf(r), 0);
+  const cshNHC = shNHC > 0 ? shNHC : nhcOf((DATA.clusters||[]).find(c => c.cluster === clusterSHState.cluster));
+
   document.getElementById("csh-summary").textContent =
     `${rows.length} people · ${activeCount} active · ${inr(vTotal)} visits · ₹${inrShort(totalCost)} cost`;
 
@@ -1997,6 +2138,8 @@ function redrawClusterSH() {
       <div class="cost-tile"><div class="lbl">Cluster CPV</div><div class="val">₹${inr(clusterCPV)}</div><div class="pct">cost ÷ visits</div></div>
       <div class="cost-tile"><div class="lbl">Total visits</div><div class="val">${inr(vTotal)}</div><div class="pct">${activeCount} active SHs</div></div>
       <div class="cost-tile"><div class="lbl">Not in mastersheet</div><div class="val" style="color:${dumpOnlyCount > 0 ? 'var(--warn)' : 'var(--good)'}">${dumpOnlyCount}</div><div class="pct">${inr(vNoMaster)} visits, no salary</div></div>
+      <div class="cost-tile"><div class="lbl">New hire cost</div><div class="val">${cshNHC > 0 ? '<span class="cur">₹</span>' + inrShort(cshNHC) : '—'}</div><div class="pct">${cshNHC > 0 ? pct(cshNHC, totalCost) + ' of cluster cost' : 'needs newHireCost in payload'}</div></div>
+      <div class="cost-tile"><div class="lbl">NHC per visit</div><div class="val">${cshNHC > 0 && vTotal > 0 ? '<span class="cur">₹</span>' + inr(Math.round(cshNHC/vTotal)) : '—'}</div><div class="pct">${cshNHC > 0 && vTotal > 0 ? 'of ₹' + inr(Math.round(clusterCPV)) + ' cluster CPV' : 'first-14-day SH cost'}</div></div>
     </div>
   `;
 
@@ -2131,9 +2274,12 @@ function renderPMAdherence() {
     G.cpvPM   = G.pmTmAdj   > 0 ? G.costPM / G.pmTmAdj  : 0;
     G.vDayPM  = G.pmManDays > 0 ? G.pmDone / G.pmManDays : 0;
     G.runRate = G.pmManDays > 0 ? G.pmDone / G.pmManDays : 0;
-    G.daysInMonth = DATA.meta.daysInMonth || 30;
-    G.daysLeft  = G.daysInMonth - (G.daysInMonth * 0.7);
+    const _mp = monthProgress();
+    G.daysInMonth = _mp.daysInMonth;
+    G.daysElapsed = _mp.elapsed;
+    G.daysLeft    = _mp.remaining;      // real days remaining, from meta.asOf
     G.projClose = G.runRate > 0 ? G.balance / G.runRate : null;
+    G.proj      = pmProjection(G.pmDue, G.pmDone);
     G.nCities   = list.length;
     return G;
   }
@@ -2203,6 +2349,60 @@ function renderPMAdherence() {
           <span>0</span><span style="color:var(--warn);font-weight:600">70% target</span><span style="color:var(--good);font-weight:600">85% good</span><span>${inr(Math.round(G.pmDue))}</span>
         </div>
       </div>
+
+      ${(() => {
+        const P = G.proj;
+        const ok = P.onTrack;
+        const col = ok ? 'var(--good)' : P.projPct >= 85 ? 'var(--warn)' : 'var(--danger)';
+        const liftTxt = P.liftNeeded === null ? 'no run rate yet'
+          : P.liftNeeded <= 1 ? 'current pace is enough'
+          : 'needs ' + Math.round((P.liftNeeded - 1) * 100) + '% more per day';
+        return `
+        <div class="card" style="padding:0;margin-bottom:28px;overflow:hidden;border-left:4px solid ${col}">
+          <div style="padding:16px 22px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:8px">
+            <div>
+              <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--ink-3)">Month-end projection · at current productivity</div>
+              <div style="font-size:11px;color:var(--ink-4);margin-top:3px">Day ${P.elapsed} of ${P.daysInMonth} · ${P.remaining} day${P.remaining===1?'':'s'} left · rate = PM done ÷ days elapsed</div>
+            </div>
+            <div style="font-size:13px;font-weight:800;color:${col}">
+              ${ok ? 'ON TRACK to clear all PM' : 'WILL FALL SHORT by ' + inr(Math.round(P.projPending)) + ' tickets'}
+            </div>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr))">
+            <div style="padding:16px 22px;border-right:1px solid var(--line)">
+              <div style="font-size:9.5px;text-transform:uppercase;letter-spacing:.11em;color:var(--ink-4);font-weight:700">Current rate</div>
+              <div style="font-size:26px;font-weight:800;color:var(--ss-navy)">${P.perDay.toFixed(1)}</div>
+              <div style="font-size:10.5px;color:var(--ink-3);margin-top:3px">PM / calendar day</div>
+            </div>
+            <div style="padding:16px 22px;border-right:1px solid var(--line)">
+              <div style="font-size:9.5px;text-transform:uppercase;letter-spacing:.11em;color:var(--ink-4);font-weight:700">Rate needed</div>
+              <div style="font-size:26px;font-weight:800;color:${P.reqPerDay>P.perDay?'var(--danger)':'var(--good)'}">${P.reqPerDay===Infinity?'—':P.reqPerDay.toFixed(1)}</div>
+              <div style="font-size:10.5px;color:var(--ink-3);margin-top:3px">to clear balance · ${liftTxt}</div>
+            </div>
+            <div style="padding:16px 22px;border-right:1px solid var(--line)">
+              <div style="font-size:9.5px;text-transform:uppercase;letter-spacing:.11em;color:var(--ink-4);font-weight:700">Projected PM done</div>
+              <div style="font-size:26px;font-weight:800;color:${col}">${inr(Math.round(P.projected))}</div>
+              <div style="font-size:10.5px;color:var(--ink-3);margin-top:3px">${P.projPct.toFixed(1)}% of ${inr(Math.round(P.due))} due</div>
+            </div>
+            <div style="padding:16px 22px">
+              <div style="font-size:9.5px;text-transform:uppercase;letter-spacing:.11em;color:var(--ink-4);font-weight:700">Pending at month end</div>
+              <div style="font-size:26px;font-weight:800;color:${P.projPending>0?'var(--danger)':'var(--good)'}">${inr(Math.round(P.projPending))}</div>
+              <div style="font-size:10.5px;color:var(--ink-3);margin-top:3px">${P.projPending>0?'tickets expected to slip':'nothing expected to slip'}</div>
+            </div>
+          </div>
+          <div style="padding:14px 22px;background:var(--bg-2);border-top:1px solid var(--line)">
+            <div style="height:14px;background:#fff;border:1px solid var(--line);border-radius:7px;overflow:hidden;display:flex">
+              <div style="height:100%;width:${Math.min(100,P.donePct).toFixed(1)}%;background:var(--good)" title="Done: ${inr(P.done)}"></div>
+              <div style="height:100%;width:${Math.min(100-Math.min(100,P.donePct),Math.max(0,P.projPct-P.donePct)).toFixed(1)}%;background:var(--ss-amber);opacity:.75" title="Projected additional: ${inr(Math.round(P.projected-P.done))}"></div>
+            </div>
+            <div style="display:flex;gap:18px;margin-top:8px;font-size:10.5px;color:var(--ink-3);flex-wrap:wrap">
+              <span><span class="swatch" style="background:var(--good)"></span>Done ${inr(P.done)} (${P.donePct.toFixed(1)}%)</span>
+              <span><span class="swatch" style="background:var(--ss-amber)"></span>Projected further ${inr(Math.round(P.projected-P.done))}</span>
+              <span><span class="swatch" style="background:#fff;border:1px solid var(--line)"></span>Expected shortfall ${inr(Math.round(P.projPending))}</span>
+            </div>
+          </div>
+        </div>`;
+      })()}
   `; }
 
   const html = `
@@ -2237,8 +2437,8 @@ function renderPMAdherence() {
         </div>
         <div style="display:flex;gap:8px;align-items:center">
           <span style="font-size:11px;color:var(--ink-4)">Sort:</span>
-          ${['% done','balance','pmDue','runRate'].map(k=>
-            `<button class="pma-sort" data-k="${k}" style="padding:4px 12px;border:1px solid var(--line);border-radius:14px;background:#fff;color:var(--ink-3);font-size:11px;font-weight:600;cursor:pointer;font-family:inherit">${k==='% done'?'% Done':k==='balance'?'Balance':k==='pmDue'?'PM Due':'Run Rate'}</button>`
+          ${['% done','balance','pmDue','runRate','projPending'].map(k=>
+            `<button class="pma-sort" data-k="${k}" style="padding:4px 12px;border:1px solid var(--line);border-radius:14px;background:#fff;color:var(--ink-3);font-size:11px;font-weight:600;cursor:pointer;font-family:inherit">${k==='% done'?'% Done':k==='balance'?'Balance':k==='pmDue'?'PM Due':k==='runRate'?'Run Rate':'Proj. Pending'}</button>`
           ).join('')}
         </div>
       </div>
@@ -2257,6 +2457,7 @@ function renderPMAdherence() {
         if (pmSortKey==='balance')  return Math.max(0,(c.pmDue||0)-(c.pmDone||0));
         if (pmSortKey==='pmDue')    return c.pmDue||0;
         if (pmSortKey==='runRate')  return c.pmManDays>0 ? (c.pmDone||0)/c.pmManDays : 0;
+        if (pmSortKey==='projPending') return pmProjection(c.pmDue, c.pmDone).projPending;
         return 0;
       };
       return pmSortAsc ? getV(a)-getV(b) : getV(b)-getV(a);
@@ -2275,6 +2476,8 @@ function renderPMAdherence() {
       const cm      = c.cm || 0;
       // projection: SH-days needed to finish at current rate
       const projDays = rr > 0 ? (bal / rr / Math.max(forPM,1)).toFixed(1) : null;
+      // month-end projection at this cluster's own calendar run rate
+      const P = pmProjection(due, done);
 
       const pctColor = pct>=85?'var(--good)':pct>=70?'var(--ss-amber)':'var(--danger)';
       const barW     = Math.min(100, pct).toFixed(1);
@@ -2327,8 +2530,20 @@ function renderPMAdherence() {
           </div>
         </div>
 
+        <!-- month-end projection -->
+        <div style="margin-top:10px;padding:9px 11px;border-radius:7px;background:${P.projPending>0?'var(--danger-soft,#FEF2F2)':'var(--good-soft,#ECFDF5)'};border:1px solid ${P.projPending>0?'var(--danger)':'var(--good)'}">
+          <div style="display:flex;justify-content:space-between;align-items:baseline">
+            <div style="font-size:8.5px;text-transform:uppercase;letter-spacing:.1em;color:var(--ink-3);font-weight:700">Projected month end</div>
+            <div style="font-size:10px;font-weight:700;color:${P.projPending>0?'var(--danger)':'var(--good)'}">${P.projPct.toFixed(0)}% of due</div>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:4px">
+            <div style="font-size:10.5px;color:var(--ink-2)">${P.perDay.toFixed(1)}/day now · ${P.reqPerDay===Infinity?'—':P.reqPerDay.toFixed(1)}/day needed</div>
+            <div style="font-size:13px;font-weight:800;color:${P.projPending>0?'var(--danger)':'var(--good)'}">${P.projPending>0?inr(Math.round(P.projPending))+' pending':'clears'}</div>
+          </div>
+        </div>
+
         <!-- projection footer -->
-        <div style="margin-top:10px;padding-top:9px;border-top:1px solid var(--line);display:flex;justify-content:space-between;align-items:center">
+        <div style="margin-top:8px;padding-top:9px;border-top:1px solid var(--line);display:flex;justify-content:space-between;align-items:center">
           <div style="font-size:10.5px;color:var(--ink-3)">CM done: <b style="color:var(--ink)">${inr(cm)}</b></div>
           <div style="font-size:10.5px;color:${projDays&&+projDays<=5?'var(--good)':projDays&&+projDays<=12?'var(--warn)':'var(--danger)'}">
             ${projDays ? `~${projDays} days/SH to close` : 'no rate data'}
