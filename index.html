@@ -444,6 +444,32 @@ const round = (n, d=0) => +(+n || 0).toFixed(d);
 // Every reader below degrades to 0 / "—" when the field is absent, so the
 // dashboard keeps working against an un-patched web app.
 const nhcOf      = o => (o && +o.newHireCost) || 0;
+// present-and-zero is NOT the same as absent: ₹0 means "no new hires this
+// month", absent means WebApp.gs hasn't been patched yet.
+const nhcHas     = o => !!(o && Object.prototype.hasOwnProperty.call(o, "newHireCost"));
+const nhcLive    = () => nhcHas(DATA.totals) || (DATA.clusters||[]).some(nhcHas) || (DATA.shLevel||[]).some(nhcHas);
+const nhcPerSH   = () => (DATA.shLevel||[]).some(nhcHas);
+// per-SH lookup for views that don't carry shLevel rows (e.g. Deep Dive)
+function nhcSHIndex() {
+  if (DATA.__nhcSH) return DATA.__nhcSH;
+  const byCode = {}, byName = {};
+  (DATA.shLevel||[]).forEach(r => {
+    if (!nhcHas(r)) return;
+    const code = String(r.empCode||"").trim();
+    const name = String(r.name||"").trim().toLowerCase().replace(/\s+/g," ");
+    if (code) byCode[code] = +r.newHireCost || 0;
+    if (name) byName[name] = +r.newHireCost || 0;
+  });
+  DATA.__nhcSH = { byCode, byName };
+  return DATA.__nhcSH;
+}
+function nhcForSH(empCode, name) {
+  const ix = nhcSHIndex();
+  const code = String(empCode||"").trim();
+  if (code && ix.byCode.hasOwnProperty(code)) return ix.byCode[code];
+  const n = String(name||"").trim().toLowerCase().replace(/\s+/g," ");
+  return n && ix.byName.hasOwnProperty(n) ? ix.byName[n] : 0;
+}
 const totalsNHC  = () => (+((DATA.totals||{}).newHireCost)) || (DATA.clusters||[]).reduce((s,c)=>s+nhcOf(c),0);
 const hasNHC     = () => totalsNHC() > 0;
 // NHC per visit — how many rupees of each visit's cost is new-hire spend
@@ -703,7 +729,7 @@ function renderOverview() {
       const nhc = totalsNHC();
       const nhcShare = consolCost ? nhc / consolCost * 100 : 0;
       const newSH = T.newSH || DATA.clusters.reduce((s,c)=>s+(c.newSH||0),0);
-      if (!nhc) return `
+      if (!nhcLive()) return `
         <div style="margin-top:14px;padding:12px 16px;border:1px dashed var(--line);border-radius:9px;font-size:11.5px;color:var(--ink-4)">
           New hire cost is not in this payload — add <code>newHireCost</code> to the WebApp.gs response to light up this row.
         </div>`;
@@ -1394,6 +1420,17 @@ function renderDDResults(rows) {
             <div class="k-val">${secondary}</div>
             <div class="k-sub">${total > 0 ? ((secondary/total)*100).toFixed(0) : 0}% of total</div>
           </div>
+          ${(() => {
+            if (!nhcPerSH()) return '';
+            const own = nhcForSH(r.empCode, r.name);
+            if (!own) return '';
+            return `
+          <div class="kpi-mini" style="background:var(--warn-soft,#FEF9EC)">
+            <div class="k-lbl">New hire cost</div>
+            <div class="k-val">₹${inr(own)}</div>
+            <div class="k-sub">₹${inr(total > 0 ? Math.round(own/total) : 0)} per visit · first 14 days</div>
+          </div>`;
+          })()}
           <div class="kpi-mini">
             <div class="k-lbl">Cluster CPV PM</div>
             <div class="k-val">${clusterCpvPM > 0 ? '₹' + inr(clusterCpvPM) : '—'}</div>
@@ -2114,10 +2151,15 @@ function redrawClusterSH() {
   const vNoMaster = rows.filter(r => r.group === 'no_master').reduce((s,r)=>s+(r.total||0),0);
   const vTotal    = vActive + vInactive + vNoMaster;
 
-  // New hire cost for this cluster — per-SH if WebApp.gs sends it on shLevel
-  // (so it respects the EMP filter), else the cluster-level figure.
-  const shNHC  = rows.reduce((s,r) => s + nhcOf(r), 0);
-  const cshNHC = shNHC > 0 ? shNHC : nhcOf((DATA.clusters||[]).find(c => c.cluster === clusterSHState.cluster));
+  // New hire cost — per-SH when WebApp.gs sends it on shLevel (respects the
+  // EMP filter), otherwise the cluster-level figure from Visits Analysis View.
+  const cshCluster = (DATA.clusters||[]).find(c => c.cluster === clusterSHState.cluster);
+  const perSH      = nhcPerSH();
+  const cshNHC     = perSH ? rows.reduce((s,r) => s + nhcOf(r), 0) : nhcOf(cshCluster);
+  const cshLive    = perSH || nhcHas(cshCluster) || nhcHas(DATA.totals);
+  const newHires   = rows.filter(r => nhcOf(r) > 0);
+  const nhVisits   = newHires.reduce((s,r) => s + (r.total||0), 0);
+  const nhSource   = perSH ? 'per SH · respects the EMP filter' : 'cluster total from Visits Analysis View';
 
   document.getElementById("csh-summary").textContent =
     `${rows.length} people · ${activeCount} active · ${inr(vTotal)} visits · ₹${inrShort(totalCost)} cost`;
@@ -2138,9 +2180,32 @@ function redrawClusterSH() {
       <div class="cost-tile"><div class="lbl">Cluster CPV</div><div class="val">₹${inr(clusterCPV)}</div><div class="pct">cost ÷ visits</div></div>
       <div class="cost-tile"><div class="lbl">Total visits</div><div class="val">${inr(vTotal)}</div><div class="pct">${activeCount} active SHs</div></div>
       <div class="cost-tile"><div class="lbl">Not in mastersheet</div><div class="val" style="color:${dumpOnlyCount > 0 ? 'var(--warn)' : 'var(--good)'}">${dumpOnlyCount}</div><div class="pct">${inr(vNoMaster)} visits, no salary</div></div>
-      <div class="cost-tile"><div class="lbl">New hire cost</div><div class="val">${cshNHC > 0 ? '<span class="cur">₹</span>' + inrShort(cshNHC) : '—'}</div><div class="pct">${cshNHC > 0 ? pct(cshNHC, totalCost) + ' of cluster cost' : 'needs newHireCost in payload'}</div></div>
-      <div class="cost-tile"><div class="lbl">NHC per visit</div><div class="val">${cshNHC > 0 && vTotal > 0 ? '<span class="cur">₹</span>' + inr(Math.round(cshNHC/vTotal)) : '—'}</div><div class="pct">${cshNHC > 0 && vTotal > 0 ? 'of ₹' + inr(Math.round(clusterCPV)) + ' cluster CPV' : 'first-14-day SH cost'}</div></div>
+      <div class="cost-tile"><div class="lbl">New hire cost</div><div class="val">${!cshLive ? '—' : '<span class="cur">₹</span>' + inrShort(cshNHC)}</div><div class="pct">${!cshLive ? 'needs newHireCost in payload' : cshNHC > 0 ? pct(cshNHC, totalCost) + ' of cluster cost' : 'no new hires this month'}</div></div>
+      <div class="cost-tile"><div class="lbl">NHC per visit</div><div class="val">${!cshLive ? '—' : '<span class="cur">₹</span>' + inr(vTotal > 0 ? Math.round(cshNHC/vTotal) : 0)}</div><div class="pct">${!cshLive ? 'first-14-day SH cost' : 'of ₹' + inr(Math.round(clusterCPV)) + ' cluster CPV'}</div></div>
     </div>
+
+    ${!cshLive ? '' : `
+    <!-- New-hire block — same three lines as the workbook, at cluster / filtered level -->
+    <div style="margin-top:14px;display:flex;gap:0;border:1px solid var(--line);border-radius:10px;overflow:hidden">
+      <div style="padding:12px 18px;background:var(--ss-navy);min-width:190px">
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:.12em;color:var(--ss-amber);font-weight:700">New hire SH</div>
+        <div style="font-size:11px;color:rgba(255,255,255,.6);margin-top:4px">${newHires.length ? inr(newHires.length) + (newHires.length===1?' person':' people') : (perSH ? 'none in this view' : 'cluster-level figure')}</div>
+      </div>
+      <div style="padding:12px 18px;background:var(--warn-soft,#FEF9EC);border-right:1px solid var(--line);flex:1">
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--ink-3);font-weight:700">Cost of new hire</div>
+        <div style="font-size:19px;font-weight:800;color:var(--ink)">₹${inr(Math.round(cshNHC))}</div>
+      </div>
+      <div style="padding:12px 18px;background:var(--warn-soft,#FEF9EC);border-right:1px solid var(--line);flex:1">
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--ink-3);font-weight:700">No of visit</div>
+        <div style="font-size:19px;font-weight:800;color:var(--ink)">${inr(perSH ? nhVisits : vTotal)}</div>
+        <div style="font-size:9.5px;color:var(--ink-4);margin-top:2px">${perSH ? 'by the new hires above' : 'all visits in cluster'}</div>
+      </div>
+      <div style="padding:12px 18px;background:var(--warn-soft,#FEF9EC);flex:1">
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--ink-3);font-weight:700">Cost attributed to new hires</div>
+        <div style="font-size:19px;font-weight:800;color:var(--ss-navy)">₹${inr(vTotal > 0 ? Math.round(cshNHC/vTotal) : 0)}</div>
+        <div style="font-size:9.5px;color:var(--ink-4);margin-top:2px">per visit · ${nhSource}</div>
+      </div>
+    </div>`}
   `;
 
   // sort
@@ -2166,6 +2231,7 @@ function redrawClusterSH() {
     <th data-csh="toolkit" style="text-align:right;padding:11px 14px;cursor:pointer">Toolkit</th>
     <th data-csh="otherCost" style="text-align:right;padding:11px 14px;cursor:pointer">Other (20%)</th>
     <th data-csh="totalCost" style="text-align:right;padding:11px 14px;cursor:pointer">Total Cost</th>
+    ${perSH ? '<th data-csh="newHireCost" style="text-align:right;padding:11px 14px;cursor:pointer">New Hire Cost</th>' : ''}
     <th data-csh="pm" style="text-align:right;padding:11px 14px;cursor:pointer">PM</th>
     <th data-csh="cm" style="text-align:right;padding:11px 14px;cursor:pointer">CM</th>
     <th data-csh="total" style="text-align:right;padding:11px 14px;cursor:pointer">Visits</th>
@@ -2194,6 +2260,9 @@ function redrawClusterSH() {
       <td style="text-align:right;color:var(--ink-3)">₹${inr(r.toolkit||0)}</td>
       <td style="text-align:right;color:var(--ink-3)">₹${inr(r.otherCost||0)}</td>
       <td style="text-align:right;font-weight:600">₹${inr(r.totalCost||0)}${costBar}</td>
+      ${perSH ? `<td style="text-align:right">${nhcOf(r) > 0
+          ? `<span class="chip warn" title="in first 14 days from DOJ">₹${inr(nhcOf(r))}</span>`
+          : '<span style="color:var(--ink-4)">—</span>'}</td>` : ''}
       <td style="text-align:right">${r.pm||0}</td>
       <td style="text-align:right">${r.cm||0}</td>
       <td style="text-align:right;font-weight:600">${r.total||0}</td>
