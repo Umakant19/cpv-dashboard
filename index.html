@@ -474,6 +474,11 @@ const totalsNHC  = () => (+((DATA.totals||{}).newHireCost)) || (DATA.clusters||[
 const hasNHC     = () => totalsNHC() > 0;
 // NHC per visit — how many rupees of each visit's cost is new-hire spend
 const nhcCpvOf   = (nhc, visits) => (visits > 0 ? nhc / visits : 0);
+// The sheet now ships its own "New Hire CPV" column (= cost ÷ adjusted
+// visits). Prefer it so the dashboard always agrees with Visits Analysis
+// View; fall back to computing only when the field isn't there.
+const nhcCpvSheet = o => (o && o.newHireCpv !== undefined && o.newHireCpv !== null && o.newHireCpv !== "") ? +o.newHireCpv : null;
+const nhcCpvBest  = (o, nhc, visits) => { const s = nhcCpvSheet(o); return s !== null ? s : nhcCpvOf(nhc, visits); };
 const fmtNhcCpv  = (nhc, visits) => (visits > 0 && nhc > 0 ? "\u20B9" + inr(Math.round(nhc / visits)) : "\u2014");
 
 // ── MONTH PROGRESS + PM PROJECTION ────────────────────────────────────
@@ -741,7 +746,11 @@ function renderOverview() {
         </div>
         <div class="grid-4">
           <div class="cost-tile"><div class="lbl">New hire cost</div><div class="val"><span class="cur">₹</span>${inrShort(nhc)}</div><div class="pct">${nhcShare.toFixed(1)}% of total cost</div><div class="bar-track"><i style="width:${Math.min(100,nhcShare).toFixed(1)}%;background:var(--ss-amber)"></i></div></div>
-          <div class="cost-tile"><div class="lbl">NHC per visit</div><div class="val"><span class="cur">₹</span>${inr(Math.round(nhcCpvOf(nhc, totalVisits)))}</div><div class="pct">of ₹${inr(T.cpvBlended)} blended CPV</div><div class="bar-track"><i style="width:${T.cpvBlended?Math.min(100,nhcCpvOf(nhc,totalVisits)/T.cpvBlended*100).toFixed(1):0}%;background:var(--ss-amber)"></i></div></div>
+          ${(() => {
+            const v = nhcCpvBest(T, nhc, totalVisits);
+            const fromSheet = nhcCpvSheet(T) !== null;
+            return `<div class="cost-tile"><div class="lbl">NHC per visit</div><div class="val"><span class="cur">₹</span>${inr(Math.round(v))}</div><div class="pct">of ₹${inr(T.cpvBlended)} blended CPV${fromSheet ? ' · from sheet' : ''}</div><div class="bar-track"><i style="width:${T.cpvBlended?Math.min(100,v/T.cpvBlended*100).toFixed(1):0}%;background:var(--ss-amber)"></i></div></div>`;
+          })()}
           <div class="cost-tile"><div class="lbl">NHC share of salary</div><div class="val">${pct(nhc, T.salaryCost||0)}</div><div class="pct">of ₹${inrShort(T.salaryCost||0)} salary</div></div>
           <div class="cost-tile"><div class="lbl">Clusters hiring</div><div class="val">${DATA.clusters.filter(c=>nhcOf(c)>0).length}</div><div class="pct">of ${DATA.clusters.length} carry new-hire cost</div></div>
         </div>
@@ -1036,7 +1045,7 @@ function renderTblBody() {
   };
 
   // precompute NHC per visit so the column sorts like any other key
-  DATA.clusters.forEach(c => { c.nhcCpv = Math.round(nhcCpvOf(nhcOf(c), c.totalVisits || 0)); });
+  DATA.clusters.forEach(c => { c.nhcCpv = Math.round(nhcCpvBest(c, nhcOf(c), c.totalVisits || 0)); });
 
   const filtered = DATA.clusters.filter(c => c.cluster.toLowerCase().includes(tblState.q));
   filtered.sort((a, b) => {
@@ -1094,7 +1103,11 @@ function renderTblBody() {
     <td>₹${inrShort(sum('bikeCost'))}</td>
     <td>₹${inr(tCost)}</td>
     <td>${sum('newHireCost') > 0 ? "₹" + inrShort(sum('newHireCost')) : "—"}</td>
-    <td>${sum('newHireCost') > 0 && sum('totalVisits') > 0 ? "₹" + inr(Math.round(sum('newHireCost')/sum('totalVisits'))) : "—"}</td>
+    <td>${(() => {
+      const t = nhcCpvSheet(DATA.totals);
+      if (t !== null && filtered.length === DATA.clusters.length) return "₹" + inr(Math.round(t));
+      return sum('newHireCost') > 0 && sum('totalVisits') > 0 ? "₹" + inr(Math.round(sum('newHireCost')/sum('totalVisits'))) : "—";
+    })()}</td>
     <td>${vdayPM.toFixed(2)}</td>
     <td>${vdayBld.toFixed(2)}</td>
     <td>₹${inr(cpvPM)}</td>
@@ -2181,7 +2194,11 @@ function redrawClusterSH() {
       <div class="cost-tile"><div class="lbl">Total visits</div><div class="val">${inr(vTotal)}</div><div class="pct">${activeCount} active SHs</div></div>
       <div class="cost-tile"><div class="lbl">Not in mastersheet</div><div class="val" style="color:${dumpOnlyCount > 0 ? 'var(--warn)' : 'var(--good)'}">${dumpOnlyCount}</div><div class="pct">${inr(vNoMaster)} visits, no salary</div></div>
       <div class="cost-tile"><div class="lbl">New hire cost</div><div class="val">${!cshLive ? '—' : '<span class="cur">₹</span>' + inrShort(cshNHC)}</div><div class="pct">${!cshLive ? 'needs newHireCost in payload' : cshNHC > 0 ? pct(cshNHC, totalCost) + ' of cluster cost' : 'no new hires this month'}</div></div>
-      <div class="cost-tile"><div class="lbl">NHC per visit</div><div class="val">${!cshLive ? '—' : '<span class="cur">₹</span>' + inr(vTotal > 0 ? Math.round(cshNHC/vTotal) : 0)}</div><div class="pct">${!cshLive ? 'first-14-day SH cost' : 'of ₹' + inr(Math.round(clusterCPV)) + ' cluster CPV'}</div></div>
+      ${(() => {
+        const sheetCpv = perSH ? null : nhcCpvSheet(cshCluster);
+        const v = sheetCpv !== null ? sheetCpv : (vTotal > 0 ? cshNHC/vTotal : 0);
+        return `<div class="cost-tile"><div class="lbl">NHC per visit</div><div class="val">${!cshLive ? '—' : '<span class="cur">₹</span>' + inr(Math.round(v))}</div><div class="pct">${!cshLive ? 'first-14-day SH cost' : (sheetCpv !== null ? 'from sheet · New Hire CPV' : 'of ₹' + inr(Math.round(clusterCPV)) + ' cluster CPV')}</div></div>`;
+      })()}
     </div>
 
     ${!cshLive ? '' : `
@@ -2202,7 +2219,7 @@ function redrawClusterSH() {
       </div>
       <div style="padding:12px 18px;background:var(--warn-soft,#FEF9EC);flex:1">
         <div style="font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--ink-3);font-weight:700">Cost attributed to new hires</div>
-        <div style="font-size:19px;font-weight:800;color:var(--ss-navy)">₹${inr(vTotal > 0 ? Math.round(cshNHC/vTotal) : 0)}</div>
+        <div style="font-size:19px;font-weight:800;color:var(--ss-navy)">₹${inr(Math.round(perSH ? (vTotal > 0 ? cshNHC/vTotal : 0) : (nhcCpvSheet(cshCluster) !== null ? nhcCpvSheet(cshCluster) : (vTotal > 0 ? cshNHC/vTotal : 0))))}</div>
         <div style="font-size:9.5px;color:var(--ink-4);margin-top:2px">per visit · ${nhSource}</div>
       </div>
     </div>`}
