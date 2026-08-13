@@ -353,8 +353,9 @@ async function loadData(monthKey) {
 
   // Apps Script cold-starts can take 30s+ and throws occasional 429/500s,
   // so give each attempt a long timeout and retry with backoff.
-  const ATTEMPTS = 3, TIMEOUT_MS = 60000, BACKOFF = [1500, 4000];
+  const ATTEMPTS = 4, TIMEOUT_MS = 60000, BACKOFF = [1500, 4000, 8000];
   let lastErr = null;
+  lastLoadStatus = 0;
 
   for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
     setStatus(attempt === 1 ? "LOADING…" : "RETRYING…",
@@ -363,9 +364,20 @@ async function loadData(monthKey) {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
     try {
-      const res = await fetch(url + "?cb=" + Date.now(), { redirect: "follow", signal: ctrl.signal, cache: "no-store" });
+      // Alternate the cache-buster: some Apps Script deployments 404 on a
+      // query string they don't expect, so every other attempt uses the bare
+      // /exec URL. Whichever works, works.
+      const useCb = (attempt % 2 === 1);
+      const res = await fetch(useCb ? url + "?cb=" + Date.now() : url,
+                              { redirect: "follow", signal: ctrl.signal, cache: "no-store" });
       clearTimeout(timer);
-      if (!res.ok) throw new Error("HTTP " + res.status + (res.status === 429 ? " (rate limited)" : ""));
+      if (!res.ok) {
+        lastLoadStatus = res.status;
+        throw new Error("HTTP " + res.status +
+          (res.status === 404 ? " (deployment not found)" :
+           res.status === 429 ? " (rate limited)" :
+           res.status === 403 ? " (access denied)" : ""));
+      }
       const text = await res.text();
       let json;
       try { json = JSON.parse(text); }
@@ -386,6 +398,7 @@ async function loadData(monthKey) {
 
   DATA = null;
   lastLoadError = lastErr && lastErr.message ? lastErr.message : "unknown error";
+  lastLoadUrl = url;
   setStatus("OFFLINE", "failed after " + ATTEMPTS + " attempts — " + lastLoadError, true);
   return false;
 }
@@ -401,15 +414,34 @@ async function retryLoad(monthKey) {
   RENDER[currentTab]();
 }
 
+let lastLoadStatus = 0, lastLoadUrl = "";
+
+// Explains the actual failure instead of always blaming a cold start.
+function loadErrorHint(code, msg) {
+  if (code === 404) return 'The <code>/exec</code> URL returned <b>404 — deployment not found</b>. ' +
+    'That is not a timeout: either this month\u2019s deployment was replaced with a new one (a NEW deployment gets a NEW URL \u2014 ' +
+    'use <i>Manage deployments \u2192 pencil \u2192 New version</i> to keep the old URL), or it was archived, ' +
+    'or Google was mid-update when the page loaded. If Retry keeps failing, paste the current /exec URL into <code>MONTH_URLS</code>.';
+  if (code === 403) return 'The web app returned <b>403 \u2014 access denied</b>. Set <i>Deploy \u2192 Manage deployments \u2192 Who has access</i> to <b>Anyone</b>.';
+  if (code === 429 || code === 500 || code === 503) return 'Google returned a temporary error (' + code + '). Retrying usually clears it.';
+  if (/timed out/i.test(msg || '')) return 'The web app did not respond within 60s \u2014 usually a slow cold start on a heavy sheet. Retrying often works.';
+  if (/HTML page/i.test(msg || '')) return 'The URL returned a sign-in page instead of JSON \u2014 check <i>Who has access</i> on the deployment.';
+  if (/Failed to fetch/i.test(msg || '')) return 'The browser could not reach the URL at all \u2014 network, or the deployment is blocked cross-origin.';
+  return 'Retrying often works. If it persists, check the deployment URL and access settings.';
+}
+
 function showLoadError(monthKey) {
   document.getElementById("app").innerHTML =
     '<div class="loading" style="flex-direction:column;gap:12px;text-align:center">' +
     '<div style="font-weight:600;font-size:15px">Could not load ' + monthKey + ' data</div>' +
     '<div style="font-size:12px;opacity:.75;max-width:460px;line-height:1.6">' +
       (lastLoadError ? 'Error: <code>' + lastLoadError + '</code><br>' : '') +
-      'The Apps Script web app did not respond in time. This is usually a slow cold start \u2014 retrying often works.' +
+      loadErrorHint(lastLoadStatus, lastLoadError) +
     '</div>' +
-    '<button id="retry-btn" class="month-tab" style="cursor:pointer">Retry now</button>' +
+    '<div style="display:flex;gap:8px;align-items:center">' +
+      '<button id="retry-btn" class="month-tab" style="cursor:pointer">Retry now</button>' +
+      (lastLoadUrl ? '<a href="' + lastLoadUrl + '" target="_blank" rel="noopener" style="font-size:11px;color:var(--ink-3)">open the /exec URL in a new tab \u2197</a>' : '') +
+    '</div>' +
     '</div>';
   const b = document.getElementById("retry-btn");
   if (b) b.addEventListener("click", () => retryLoad(monthKey));
@@ -672,6 +704,17 @@ function renderOverview() {
         <div class="val">${(T.vDayBlended||0).toFixed(1)}<span class="unit">visits</span></div>
         <div class="sub"><span>per man-day attended</span></div>
       </div>
+      ${(() => {
+        const nhc = totalsNHC();
+        if (!nhcLive()) return '';
+        const v = nhcCpvBest(T, nhc, totalVisits);
+        return `
+      <div class="stat">
+        <div class="lbl">Total CPV — NHC</div>
+        <div class="val"><span class="cur">₹</span>${inr(Math.round(v))}</div>
+        <div class="sub"><span>₹${inrShort(nhc)} new-hire cost</span><span>${T.cpvBlended ? (v/T.cpvBlended*100).toFixed(1) : '0'}% of blended</span></div>
+      </div>`;
+      })()}
     </div>
 
     <div class="section">
@@ -1738,7 +1781,7 @@ function redrawCityIQ() {
           ${(() => {
             const totNhc = allCities.reduce((s,c)=>s+c.nhc,0);
             const avgNhcCpv = totalVisits > 0 ? Math.round(totNhc/totalVisits) : 0;
-            return `<div class="cost-tile" style="flex:1;min-width:160px"><div class="lbl">Avg NHC / visit</div><div class="val">${totNhc>0?'₹'+inr(avgNhcCpv):'—'}</div><div class="pct">${totNhc>0?'₹'+inrShort(totNhc)+' new-hire cost':'needs newHireCost in payload'}</div></div>`;
+            return `<div class="cost-tile" style="flex:1;min-width:160px"><div class="lbl">Total NHC / visit</div><div class="val">${totNhc>0?'₹'+inr(avgNhcCpv):'—'}</div><div class="pct">${totNhc>0?'₹'+inrShort(totNhc)+' new-hire cost':'needs newHireCost in payload'}</div></div>`;
           })()}
         </div>`;
 
