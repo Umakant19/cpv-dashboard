@@ -443,10 +443,11 @@ const round = (n, d=0) => +(+n || 0).toFixed(d);
 // excluded if the SH exited within 10 days of joining.
 // Every reader below degrades to 0 / "—" when the field is absent, so the
 // dashboard keeps working against an un-patched web app.
-const nhcOf      = o => (o && +o.newHireCost) || 0;
+const NHC_KEYS   = ["newHireCost", "newHiringCost"];   // v2.9 name, v2.8 name
+const nhcOf      = o => { if (!o) return 0; for (const k of NHC_KEYS) if (+o[k]) return +o[k]; return 0; };
 // present-and-zero is NOT the same as absent: ₹0 means "no new hires this
 // month", absent means WebApp.gs hasn't been patched yet.
-const nhcHas     = o => !!(o && Object.prototype.hasOwnProperty.call(o, "newHireCost"));
+const nhcHas     = o => !!(o && NHC_KEYS.some(k => Object.prototype.hasOwnProperty.call(o, k)));
 const nhcLive    = () => nhcHas(DATA.totals) || (DATA.clusters||[]).some(nhcHas) || (DATA.shLevel||[]).some(nhcHas);
 const nhcPerSH   = () => (DATA.shLevel||[]).some(nhcHas);
 // per-SH lookup for views that don't carry shLevel rows (e.g. Deep Dive)
@@ -470,7 +471,7 @@ function nhcForSH(empCode, name) {
   const n = String(name||"").trim().toLowerCase().replace(/\s+/g," ");
   return n && ix.byName.hasOwnProperty(n) ? ix.byName[n] : 0;
 }
-const totalsNHC  = () => (+((DATA.totals||{}).newHireCost)) || (DATA.clusters||[]).reduce((s,c)=>s+nhcOf(c),0);
+const totalsNHC  = () => nhcOf(DATA.totals) || (DATA.clusters||[]).reduce((s,c)=>s+nhcOf(c),0);
 const hasNHC     = () => totalsNHC() > 0;
 // NHC per visit — how many rupees of each visit's cost is new-hire spend
 const nhcCpvOf   = (nhc, visits) => (visits > 0 ? nhc / visits : 0);
@@ -582,8 +583,17 @@ function destroyCharts() {
 function renderHeader() {
   if (!DATA) return;
   document.getElementById("hdr-month").textContent = "— " + (DATA.meta.month || "");
-  const pay = DATA.clusters.length + " clusters · " + DATA.b2b.length + " B2B · v" + (DATA.meta.version || "1.0");
-  document.getElementById("payload-info").textContent = pay;
+  const nhcTot = totalsNHC();
+  const nhcTag = nhcTot > 0
+    ? "NHC \u20B9" + inrShort(nhcTot)
+    : (nhcLive() ? "NHC \u20B90 (field present)" : "NHC MISSING from payload");
+  const perSHTag = nhcPerSH() ? " +per-SH" : "";
+  const pay = DATA.clusters.length + " clusters · " + DATA.b2b.length + " B2B · v" +
+              (DATA.meta.version || "1.0") + " · " + nhcTag + perSHTag;
+  const el = document.getElementById("payload-info");
+  el.textContent = pay;
+  el.style.color = nhcTot > 0 ? "" : "var(--danger)";
+  el.style.fontWeight = nhcTot > 0 ? "" : "700";
 }
 
 // ── OVERVIEW PANE ────────────────────────────────────────────────────────────
@@ -1105,11 +1115,13 @@ function renderTblBody() {
     <td>₹${inrShort(sum('schedulerCost'))}</td>
     <td>₹${inrShort(sum('bikeCost'))}</td>
     <td>₹${inr(tCost)}</td>
-    <td>${sum('newHireCost') > 0 ? "₹" + inrShort(sum('newHireCost')) : "—"}</td>
+    <td>${(() => { const n = filtered.reduce((a,c)=>a+nhcOf(c),0); return n > 0 ? "₹" + inrShort(n) : "—"; })()}</td>
     <td>${(() => {
       const t = nhcCpvSheet(DATA.totals);
       if (t !== null && filtered.length === DATA.clusters.length) return "₹" + inr(Math.round(t));
-      return sum('newHireCost') > 0 && sum('totalVisits') > 0 ? "₹" + inr(Math.round(sum('newHireCost')/sum('totalVisits'))) : "—";
+      const n = filtered.reduce((a,c)=>a+nhcOf(c),0);
+      const d = sum('tvAdj') || sum('totalVisits');    // sheet divides by adjusted visits
+      return n > 0 && d > 0 ? "₹" + inr(Math.round(n/d)) : "—";
     })()}</td>
     <td>${vdayPM.toFixed(2)}</td>
     <td>${vdayBld.toFixed(2)}</td>
