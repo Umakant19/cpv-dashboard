@@ -545,10 +545,10 @@ function monthProgress() {
       } else if (aY < target.year || (aY === target.year && aM < target.month)) {
         elapsed = 1;                               // data month hasn't started
       } else {
-        elapsed = asOf.getDate() - 1;              // mid-month, live case — data lags refresh by 1 day
+        elapsed = asOf.getDate();                  // mid-month, the live case
       }
     } else {
-      elapsed = asOf.getDate() - 1;                // no month label — same 1-day lag
+      elapsed = asOf.getDate();
     }
   }
   elapsed = Math.max(1, Math.min(elapsed, dim));
@@ -2444,11 +2444,14 @@ function renderPMAdherence() {
       manDays:   list.reduce((s,c)=>s+(c.manDays||0),0),
       pmManDays: list.reduce((s,c)=>s+(c.pmManDays||0),0),
       pmTmAdj:   list.reduce((s,c)=>s+(c.pmTmAdj||0),0),
+      tvAdj:     list.reduce((s,c)=>s+(c.tvAdj||0),0),
+      newHireCost: list.reduce((s,c)=>s+nhcOf(c),0),
     };
     G.pctDone = G.pmDue > 0 ? (G.pmDone / G.pmDue * 100) : 0;
     G.balance = Math.max(0, G.pmDue - G.pmDone);
     G.cpvPM   = G.pmTmAdj   > 0 ? G.costPM / G.pmTmAdj  : 0;
     G.vDayPM  = G.pmManDays > 0 ? G.pmDone / G.pmManDays : 0;
+    G.nhcCpv  = G.tvAdj > 0 ? G.newHireCost / G.tvAdj : 0;
     G.runRate = G.pmManDays > 0 ? G.pmDone / G.pmManDays : 0;
     const _mp = monthProgress();
     G.daysInMonth = _mp.daysInMonth;
@@ -2487,7 +2490,7 @@ function renderPMAdherence() {
       </div>
 
       <!-- Secondary KPI tiles -->
-      <div class="grid-4" style="margin-bottom:28px">
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:16px;margin-bottom:28px">
         <div class="cost-tile">
           <div class="lbl">Active Service Heroes</div>
           <div class="val">${inr(G.activeSH)}</div>
@@ -2509,6 +2512,11 @@ function renderPMAdherence() {
             ${G.projClose ? inr(Math.round(G.projClose)) : '—'}
           </div>
           <div class="pct">${G.proj.closed ? 'at the rate achieved' : 'at current run rate'}</div>
+        </div>
+        <div class="cost-tile">
+          <div class="lbl">New Hire Cost</div>
+          <div class="val">${G.newHireCost > 0 ? '<span class="cur">₹</span>' + inr(Math.round(G.newHireCost)) : '—'}</div>
+          <div class="pct">${G.newHireCost > 0 ? '₹' + inr(Math.round(G.nhcCpv)) + ' / visit' : 'not in payload'}</div>
         </div>
       </div>
 
