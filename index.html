@@ -2514,9 +2514,9 @@ function renderPMAdherence() {
           <div class="pct">${G.proj.closed ? 'at the rate achieved' : 'at current run rate'}</div>
         </div>
         <div class="cost-tile">
-          <div class="lbl">New Hire Cost</div>
-          <div class="val">${G.newHireCost > 0 ? '<span class="cur">₹</span>' + inr(Math.round(G.newHireCost)) : '—'}</div>
-          <div class="pct">${G.newHireCost > 0 ? '₹' + inr(Math.round(G.nhcCpv)) + ' / visit' : 'not in payload'}</div>
+          <div class="lbl">New Hire CPV</div>
+          <div class="val">${G.nhcCpv > 0 ? '<span class="cur">₹</span>' + inr(Math.round(G.nhcCpv)) : '—'}</div>
+          <div class="pct">${G.nhcCpv > 0 ? 'new-hire ₹ / visit' : 'not in payload'}</div>
         </div>
       </div>
 
@@ -2669,6 +2669,7 @@ function renderPMAdherence() {
       const vdayPM  = c.vDayPM || 0;
       const cm      = c.cm || 0;
       const nhc     = nhcOf(c);
+      const nhcCpv  = nhcCpvBest(c, nhc, c.tvAdj || 0);
       // projection: SH-days needed to finish at current rate
       const projDays = rr > 0 ? (bal / rr / Math.max(forPM,1)).toFixed(1) : null;
       // month-end projection at this cluster's own calendar run rate
@@ -2724,9 +2725,9 @@ function renderPMAdherence() {
             <div style="font-size:14px;font-weight:700;color:var(--ss-navy)">${vdayPM.toFixed(2)}</div>
           </div>
           <div style="background:var(--bg);border-radius:7px;padding:8px 10px">
-            <div style="font-size:8.5px;text-transform:uppercase;letter-spacing:.1em;color:var(--ink-4)">NHC</div>
-            <div style="font-size:14px;font-weight:700;color:var(--ss-navy)">${nhc>0?'₹'+inr(Math.round(nhc)):'—'}</div>
-            <div style="font-size:9px;color:var(--ink-4)">new-hire cost</div>
+            <div style="font-size:8.5px;text-transform:uppercase;letter-spacing:.1em;color:var(--ink-4)">NHC / Visit</div>
+            <div style="font-size:14px;font-weight:700;color:var(--ss-navy)">${nhcCpv>0?'₹'+inr(Math.round(nhcCpv)):'—'}</div>
+            <div style="font-size:9px;color:var(--ink-4)">new-hire ₹/visit</div>
           </div>
         </div>
 
