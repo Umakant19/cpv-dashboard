@@ -815,11 +815,6 @@ function renderOverview() {
         <div class="val"><span class="cur">₹</span>${inrShort(totalCost)}</div>
         <div class="sub"><span><b>${T.activeSH}</b> active SHs</span></div>
       </div>
-      <div class="stat">
-        <div class="lbl">Productivity (V/Day)</div>
-        <div class="val">${(T.vDayBlended||0).toFixed(1)}<span class="unit">visits</span></div>
-        <div class="sub"><span>per man-day attended</span></div>
-      </div>
       ${(() => {
         const nhc = totalsNHC();
         if (!nhcLive()) return '';
