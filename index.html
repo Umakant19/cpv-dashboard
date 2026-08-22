@@ -2432,6 +2432,31 @@ function renderPMAdherence() {
   let  pmaSel = new Set(pmaAllCities);
   const pmaList = () => clusters.filter(c => pmaSel.has(c.cluster));
 
+  // ── SOH (regional head) mapping ───────────────────────────────────────────
+  // City → SOH, matched by name. If the auto-match gets a cluster wrong, add
+  // the EXACT cluster name to SOH_OVERRIDE below. Anything not matched to MP /
+  // Maharashtra / South India falls to Ankit Singh.
+  const SOH_OVERRIDE = {
+    // 'Exact Cluster Name': 'Nitesh Gehlot',
+  };
+  const SOH_REGIONS = [
+    { head:'Nitesh Gehlot', label:'Madhya Pradesh', cities:['indore','bhopal','jabalpur','gwalior','ujjain','sagar','ratlam','dewas','satna','rewa','katni','chhindwara','burhanpur','khandwa','khargone','morena','singrauli','vidisha','guna','shivpuri','mandsaur','neemuch','betul','damoh','hoshangabad','narmadapuram','sehore','chhatarpur','balaghat','seoni'] },
+    { head:'Rohan Surve', label:'Maharashtra', cities:['mumbai','navi mumbai','thane','kalyan','vasai','virar','panvel','pune','pimpri','chinchwad','nagpur','nashik','nasik','aurangabad','sambhajinagar','solapur','amravati','kolhapur','sangli','satara','jalgaon','akola','latur','ahmednagar','ahilyanagar','nanded','dhule','chandrapur','parbhani','beed','ratnagiri','wardha','yavatmal','osmanabad','dharashiv','jalna','washim','gondia','bhandara','hingoli','buldhana','nandurbar'] },
+    { head:'Utkarsh Mishra', label:'South India', cities:['bangalore','bengaluru','hyderabad','chennai','coimbatore','madurai','mysore','mysuru','hubli','hubballi','dharwad','mangalore','mangaluru','vijayawada','visakhapatnam','vizag','guntur','tirupati','warangal','kochi','cochin','ernakulam','thiruvananthapuram','trivandrum','kozhikode','calicut','thrissur','salem','tiruchirappalli','trichy','tirunelveli','vellore','erode','tumkur','tumakuru','belgaum','belagavi','davangere','ballari','bellary','shimoga','shivamogga','nellore','kurnool','rajahmundry','kakinada','kadapa','anantapur','karimnagar','nizamabad','khammam','mahbubnagar','kollam','kannur','palakkad','kottayam','malappuram','alappuzha','hosur','pondicherry','puducherry','thoothukudi','tuticorin','dindigul','karur','namakkal','nagercoil','ongole','eluru','srikakulam','vizianagaram','chittoor','hospet','raichur','bidar','kalaburagi','gulbarga','udupi'] },
+  ];
+  const DEFAULT_SOH = 'Ankit Singh';
+  function sohForCluster(name){
+    if (SOH_OVERRIDE[name]) return SOH_OVERRIDE[name];
+    const n = String(name||'').toLowerCase();
+    for (const reg of SOH_REGIONS)
+      for (const city of reg.cities)
+        if (n.indexOf(city) !== -1) return reg.head;
+    return DEFAULT_SOH;
+  }
+  const SOH_LIST = [...SOH_REGIONS.map(r=>r.head), DEFAULT_SOH];
+  const citiesForSoh = (head) => pmaAllCities.filter(ct => sohForCluster(ct) === head);
+  let pmaSoh = 'all';
+
   function pmaTotals(list) {
     const G = {
       pmDue:     list.reduce((s,c)=>s+(c.pmDue||0),0),
@@ -2610,6 +2635,10 @@ function renderPMAdherence() {
       <!-- City multi-select + cluster cards grid -->
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:12px">
         <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+          <select id="pma-soh" style="padding:7px 12px;border:1.5px solid var(--line);border-radius:8px;background:#fff;color:var(--ink);font-size:12px;font-weight:600;cursor:pointer;font-family:inherit">
+            <option value="all">All SOH (${pmaAllCities.length})</option>
+            ${SOH_LIST.map(h=>{const n=citiesForSoh(h).length;const reg=SOH_REGIONS.find(r=>r.head===h);const lbl=reg?reg.label:'Rest';return `<option value="${h}">${h} · ${lbl} (${n})</option>`;}).join('')}
+          </select>
           <div style="position:relative">
             <button id="pma-city-btn" style="display:inline-flex;align-items:center;gap:8px;padding:7px 14px;border:1.5px solid var(--line);border-radius:8px;background:#fff;color:var(--ink);font-size:12px;font-weight:600;cursor:pointer;font-family:inherit">
               <span id="pma-city-label">All cities (${pmaAllCities.length})</span>
@@ -2684,7 +2713,7 @@ function renderPMAdherence() {
         <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px">
           <div>
             <div style="font-size:15px;font-weight:800;color:var(--ss-navy)">${c.cluster}</div>
-            <div style="font-size:10.5px;color:var(--ink-3);margin-top:2px">${shs} SHs · ${forPM} on PM</div>
+            <div style="font-size:10.5px;color:var(--ink-3);margin-top:2px">${shs} SHs · ${forPM} on PM · <span style="color:var(--ss-navy);font-weight:600">${sohForCluster(c.cluster)}</span></div>
           </div>
           <div style="text-align:right">
             <div style="font-size:20px;font-weight:800;color:${pctColor}">${pct.toFixed(1)}%</div>
@@ -2821,6 +2850,15 @@ function renderPMAdherence() {
   document.getElementById('pma-city-none').addEventListener('click', () => {
     pmaSel = new Set();
     document.querySelectorAll('.pma-city-cb').forEach(cb => cb.checked = false);
+    pmaRefresh();
+  });
+
+  // ── SOH dropdown wiring ──
+  const sohSel = document.getElementById('pma-soh');
+  if (sohSel) sohSel.addEventListener('change', () => {
+    pmaSoh = sohSel.value;
+    pmaSel = (pmaSoh === 'all') ? new Set(pmaAllCities) : new Set(citiesForSoh(pmaSoh));
+    document.querySelectorAll('.pma-city-cb').forEach(cb => cb.checked = pmaSel.has(cb.value));
     pmaRefresh();
   });
 
