@@ -297,6 +297,10 @@ tbody tr:last-child td{border-bottom:0}
       </div>
     </div>
     <div class="meta">
+      <div style="margin-bottom:8px;display:flex;align-items:center;gap:6px;justify-content:flex-end">
+        <span style="font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--ink-4);font-weight:700">SOH</span>
+        <select id="global-soh" class="soh-filter" style="padding:5px 10px;border:1.5px solid var(--line);border-radius:7px;background:#fff;color:var(--ink);font-size:12px;font-weight:600;cursor:pointer;font-family:inherit"><option value="all">All SOH</option></select>
+      </div>
       <div><span class="dot" id="status-dot"></span><span id="status-text">CONNECTING…</span></div>
       <div style="margin-top:6px" id="status-detail">—</div>
     </div>
@@ -340,8 +344,9 @@ async function loadData(monthKey) {
   const url = MONTH_URLS[monthKey];
 
   if (dataCache[monthKey]) {
-    DATA = dataCache[monthKey];
-    setStatus("LIVE", "as of " + (DATA.meta && DATA.meta.asOf ? new Date(DATA.meta.asOf).toLocaleString() : "now"), false);
+    RAW = dataCache[monthKey];
+    applySohView();
+    setStatus("LIVE", "as of " + (RAW.meta && RAW.meta.asOf ? new Date(RAW.meta.asOf).toLocaleString() : "now"), false);
     return true;
   }
 
@@ -383,8 +388,9 @@ async function loadData(monthKey) {
       try { json = JSON.parse(text); }
       catch (_) { throw new Error(/<html/i.test(text) ? "got an HTML page, not JSON — check deployment access" : "invalid JSON response"); }
       if (json.error) throw new Error(json.error);
-      DATA = json;
+      RAW = json;
       dataCache[monthKey] = json;
+      applySohView();
       setStatus("LIVE", "as of " + (json.meta && json.meta.asOf ? new Date(json.meta.asOf).toLocaleString() : "now")
                         + (attempt > 1 ? " · loaded on attempt " + attempt : ""), false);
       return true;
@@ -396,7 +402,7 @@ async function loadData(monthKey) {
     }
   }
 
-  DATA = null;
+  DATA = null; RAW = null;
   lastLoadError = lastErr && lastErr.message ? lastErr.message : "unknown error";
   lastLoadUrl = url;
   setStatus("OFFLINE", "failed after " + ATTEMPTS + " attempts — " + lastLoadError, true);
@@ -644,6 +650,77 @@ function destroyCharts() {
   Object.keys(charts).forEach(k => delete charts[k]);
 }
 
+// ═════════════════════════════════════════════════════════════════════════════
+// SOH (regional head) FILTER — applies across every tab
+// ═════════════════════════════════════════════════════════════════════════════
+// City → SOH, matched by name. If a cluster lands under the wrong head, add its
+// EXACT name to SOH_OVERRIDE. Anything not matched to MP / Maharashtra / South
+// India falls to Ankit Singh.
+const SOH_OVERRIDE = {
+  // 'Exact Cluster Name': 'Nitesh Gehlot',
+};
+const SOH_REGIONS = [
+  { head:'Nitesh Gehlot', label:'Madhya Pradesh', cities:['indore','bhopal','jabalpur','gwalior','ujjain','sagar','ratlam','dewas','satna','rewa','katni','chhindwara','burhanpur','khandwa','khargone','morena','singrauli','vidisha','guna','shivpuri','mandsaur','neemuch','betul','damoh','hoshangabad','narmadapuram','sehore','chhatarpur','balaghat','seoni'] },
+  { head:'Rohan Surve', label:'Maharashtra', cities:['mumbai','navi mumbai','thane','kalyan','vasai','virar','panvel','pune','pimpri','chinchwad','nagpur','nashik','nasik','aurangabad','sambhajinagar','solapur','amravati','kolhapur','sangli','satara','jalgaon','akola','latur','ahmednagar','ahilyanagar','nanded','dhule','chandrapur','parbhani','beed','ratnagiri','wardha','yavatmal','osmanabad','dharashiv','jalna','washim','gondia','bhandara','hingoli','buldhana','nandurbar'] },
+  { head:'Utkarsh Mishra', label:'South India', cities:['bangalore','bengaluru','hyderabad','chennai','coimbatore','madurai','mysore','mysuru','hubli','hubballi','dharwad','mangalore','mangaluru','vijayawada','visakhapatnam','vizag','guntur','tirupati','warangal','kochi','cochin','ernakulam','thiruvananthapuram','trivandrum','kozhikode','calicut','thrissur','salem','tiruchirappalli','trichy','tirunelveli','vellore','erode','tumkur','tumakuru','belgaum','belagavi','davangere','ballari','bellary','shimoga','shivamogga','nellore','kurnool','rajahmundry','kakinada','kadapa','anantapur','karimnagar','nizamabad','khammam','mahbubnagar','kollam','kannur','palakkad','kottayam','malappuram','alappuzha','hosur','pondicherry','puducherry','thoothukudi','tuticorin','dindigul','karur','namakkal','nagercoil','ongole','eluru','srikakulam','vizianagaram','chittoor','hospet','raichur','bidar','kalaburagi','gulbarga','udupi'] },
+];
+const DEFAULT_SOH = 'Ankit Singh';
+const SOH_LIST = [...SOH_REGIONS.map(r=>r.head), DEFAULT_SOH];
+function sohForCluster(name){
+  if (SOH_OVERRIDE[name]) return SOH_OVERRIDE[name];
+  const n = String(name||'').toLowerCase();
+  for (const reg of SOH_REGIONS)
+    for (const city of reg.cities)
+      if (n.indexOf(city) !== -1) return reg.head;
+  return DEFAULT_SOH;
+}
+
+let RAW = null, activeSoh = 'all';
+const SOH_RATIO_KEYS = {cpvPM:1,cpvBlended:1,vDayPM:1,vDayBlended:1,pctPmDone:1,cpvB2C:1,newHireCpv:1};
+function sohRecomputeTotals(list){
+  const T = {};
+  list.forEach(c => Object.keys(c).forEach(k => {
+    if (typeof c[k] === 'number' && !SOH_RATIO_KEYS[k]) T[k] = (T[k]||0) + c[k];
+  }));
+  T.cpvPM       = T.pmTmAdj   ? T.costPM/T.pmTmAdj      : 0;
+  T.cpvBlended  = T.tvAdj     ? T.totalCost/T.tvAdj     : 0;
+  T.vDayBlended = T.manDays   ? T.totalVisits/T.manDays : 0;
+  T.vDayPM      = T.pmManDays ? T.pmDone/T.pmManDays    : 0;
+  T.newHireCpv  = T.tvAdj     ? T.newHireCost/T.tvAdj   : 0;
+  return T;
+}
+function sohRecomputeB2b(b2b){
+  const t = { totalCost:0, headcount:0, visits:0, clusters:b2b.length };
+  b2b.forEach(r => { t.totalCost += r.totalCost||0; t.headcount += r.headcount||0; t.visits += r.visits||0; });
+  return t;
+}
+function buildSohView(raw, head){
+  if (!raw || head === 'all') return raw;
+  const keep = name => sohForCluster(name) === head;
+  const clusters = (raw.clusters||[]).filter(c => keep(c.cluster));
+  const v = Object.assign({}, raw);
+  v.clusters       = clusters;
+  v.b2b            = (raw.b2b||[]).filter(r => keep(r.cluster));
+  v.shDailyPM      = (raw.shDailyPM||[]).filter(r => keep(r.cluster));
+  v.shDailyAll     = (raw.shDailyAll||[]).filter(r => keep(r.cluster));
+  v.shLevel        = (raw.shLevel||[]).filter(r => keep(r.cluster));
+  v.shDailyUnified = (raw.shDailyUnified||[]).filter(r => keep(r.cluster));
+  v.cityDaily      = (raw.cityDaily||[]).filter(r => keep(r.cluster));
+  v.totals         = sohRecomputeTotals(clusters);
+  v.b2bTotals      = sohRecomputeB2b(v.b2b);
+  v.__nhcSH        = null;
+  return v;
+}
+function applySohView(){ DATA = buildSohView(RAW, activeSoh); }
+
+// Reusable <option> list for any SOH selector; marks the active head selected.
+function sohOptionsHtml(){
+  const cities = (RAW && RAW.clusters) ? RAW.clusters.map(c => c.cluster) : [];
+  const cnt = h => cities.filter(ct => sohForCluster(ct) === h).length;
+  const opt = (val, lbl) => `<option value="${val}"${val === activeSoh ? ' selected' : ''}>${lbl}</option>`;
+  return opt('all', `All SOH (${cities.length})`) + SOH_LIST.map(h => opt(h, `${h} (${cnt(h)})`)).join('');
+}
+
 function renderHeader() {
   if (!DATA) return;
   document.getElementById("hdr-month").textContent = "— " + (DATA.meta.month || "");
@@ -658,6 +735,13 @@ function renderHeader() {
   el.textContent = pay;
   el.style.color = nhcTot > 0 ? "" : "var(--danger)";
   el.style.fontWeight = nhcTot > 0 ? "" : "700";
+
+  // populate the global SOH filter options with live counts (from the full payload)
+  const sohSel = document.getElementById('global-soh');
+  if (sohSel && RAW && RAW.clusters) {
+    sohSel.innerHTML = sohOptionsHtml();
+    sohSel.value = activeSoh;
+  }
 }
 
 // ── OVERVIEW PANE ────────────────────────────────────────────────────────────
@@ -2432,31 +2516,6 @@ function renderPMAdherence() {
   let  pmaSel = new Set(pmaAllCities);
   const pmaList = () => clusters.filter(c => pmaSel.has(c.cluster));
 
-  // ── SOH (regional head) mapping ───────────────────────────────────────────
-  // City → SOH, matched by name. If the auto-match gets a cluster wrong, add
-  // the EXACT cluster name to SOH_OVERRIDE below. Anything not matched to MP /
-  // Maharashtra / South India falls to Ankit Singh.
-  const SOH_OVERRIDE = {
-    // 'Exact Cluster Name': 'Nitesh Gehlot',
-  };
-  const SOH_REGIONS = [
-    { head:'Nitesh Gehlot', label:'Madhya Pradesh', cities:['indore','bhopal','jabalpur','gwalior','ujjain','sagar','ratlam','dewas','satna','rewa','katni','chhindwara','burhanpur','khandwa','khargone','morena','singrauli','vidisha','guna','shivpuri','mandsaur','neemuch','betul','damoh','hoshangabad','narmadapuram','sehore','chhatarpur','balaghat','seoni'] },
-    { head:'Rohan Surve', label:'Maharashtra', cities:['mumbai','navi mumbai','thane','kalyan','vasai','virar','panvel','pune','pimpri','chinchwad','nagpur','nashik','nasik','aurangabad','sambhajinagar','solapur','amravati','kolhapur','sangli','satara','jalgaon','akola','latur','ahmednagar','ahilyanagar','nanded','dhule','chandrapur','parbhani','beed','ratnagiri','wardha','yavatmal','osmanabad','dharashiv','jalna','washim','gondia','bhandara','hingoli','buldhana','nandurbar'] },
-    { head:'Utkarsh Mishra', label:'South India', cities:['bangalore','bengaluru','hyderabad','chennai','coimbatore','madurai','mysore','mysuru','hubli','hubballi','dharwad','mangalore','mangaluru','vijayawada','visakhapatnam','vizag','guntur','tirupati','warangal','kochi','cochin','ernakulam','thiruvananthapuram','trivandrum','kozhikode','calicut','thrissur','salem','tiruchirappalli','trichy','tirunelveli','vellore','erode','tumkur','tumakuru','belgaum','belagavi','davangere','ballari','bellary','shimoga','shivamogga','nellore','kurnool','rajahmundry','kakinada','kadapa','anantapur','karimnagar','nizamabad','khammam','mahbubnagar','kollam','kannur','palakkad','kottayam','malappuram','alappuzha','hosur','pondicherry','puducherry','thoothukudi','tuticorin','dindigul','karur','namakkal','nagercoil','ongole','eluru','srikakulam','vizianagaram','chittoor','hospet','raichur','bidar','kalaburagi','gulbarga','udupi'] },
-  ];
-  const DEFAULT_SOH = 'Ankit Singh';
-  function sohForCluster(name){
-    if (SOH_OVERRIDE[name]) return SOH_OVERRIDE[name];
-    const n = String(name||'').toLowerCase();
-    for (const reg of SOH_REGIONS)
-      for (const city of reg.cities)
-        if (n.indexOf(city) !== -1) return reg.head;
-    return DEFAULT_SOH;
-  }
-  const SOH_LIST = [...SOH_REGIONS.map(r=>r.head), DEFAULT_SOH];
-  const citiesForSoh = (head) => pmaAllCities.filter(ct => sohForCluster(ct) === head);
-  let pmaSoh = 'all';
-
   function pmaTotals(list) {
     const G = {
       pmDue:     list.reduce((s,c)=>s+(c.pmDue||0),0),
@@ -2635,10 +2694,7 @@ function renderPMAdherence() {
       <!-- City multi-select + cluster cards grid -->
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:12px">
         <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-          <select id="pma-soh" style="padding:7px 12px;border:1.5px solid var(--line);border-radius:8px;background:#fff;color:var(--ink);font-size:12px;font-weight:600;cursor:pointer;font-family:inherit">
-            <option value="all">All SOH (${pmaAllCities.length})</option>
-            ${SOH_LIST.map(h=>{const n=citiesForSoh(h).length;return `<option value="${h}">${h} (${n})</option>`;}).join('')}
-          </select>
+          <select class="soh-filter" style="padding:7px 12px;border:1.5px solid var(--line);border-radius:8px;background:#fff;color:var(--ink);font-size:12px;font-weight:600;cursor:pointer;font-family:inherit">${sohOptionsHtml()}</select>
           <div style="position:relative">
             <button id="pma-city-btn" style="display:inline-flex;align-items:center;gap:8px;padding:7px 14px;border:1.5px solid var(--line);border-radius:8px;background:#fff;color:var(--ink);font-size:12px;font-weight:600;cursor:pointer;font-family:inherit">
               <span id="pma-city-label">All cities (${pmaAllCities.length})</span>
@@ -2850,15 +2906,6 @@ function renderPMAdherence() {
   document.getElementById('pma-city-none').addEventListener('click', () => {
     pmaSel = new Set();
     document.querySelectorAll('.pma-city-cb').forEach(cb => cb.checked = false);
-    pmaRefresh();
-  });
-
-  // ── SOH dropdown wiring ──
-  const sohSel = document.getElementById('pma-soh');
-  if (sohSel) sohSel.addEventListener('change', () => {
-    pmaSoh = sohSel.value;
-    pmaSel = (pmaSoh === 'all') ? new Set(pmaAllCities) : new Set(citiesForSoh(pmaSoh));
-    document.querySelectorAll('.pma-city-cb').forEach(cb => cb.checked = pmaSel.has(cb.value));
     pmaRefresh();
   });
 
@@ -3131,6 +3178,11 @@ function renderSHOverall() {
       <!-- controls -->
       <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end;margin-bottom:20px;padding:16px 18px;background:var(--bg);border:1px solid var(--line);border-radius:12px">
 
+        <div>
+          <div style="font-size:9.5px;text-transform:uppercase;letter-spacing:.1em;color:var(--ink-4);font-weight:700;margin-bottom:5px">SOH</div>
+          <select class="soh-filter" style="padding:7px 12px;border:1.5px solid var(--line);border-radius:8px;background:#fff;font-size:12px;font-weight:600;font-family:inherit;color:var(--ink);cursor:pointer">${sohOptionsHtml()}</select>
+        </div>
+
         <div style="position:relative">
           <div style="font-size:9.5px;text-transform:uppercase;letter-spacing:.1em;color:var(--ink-4);font-weight:700;margin-bottom:5px">City</div>
           <button id="so-city-btn" style="display:inline-flex;align-items:center;gap:8px;padding:7px 14px;border:1.5px solid var(--line);border-radius:8px;background:#fff;color:var(--ink);font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;min-width:180px;justify-content:space-between">
@@ -3346,6 +3398,18 @@ function switchTab(name) {
 
 document.querySelectorAll(".tab").forEach(t => {
   t.addEventListener("click", () => switchTab(t.dataset.tab));
+});
+
+// ── global SOH filter: any .soh-filter selector re-filters the dataset ──
+document.addEventListener("change", e => {
+  const el = e.target;
+  if (!el || !el.classList || !el.classList.contains("soh-filter")) return;
+  activeSoh = el.value;
+  applySohView();
+  if (!DATA) { showLoadError(currentMonthKey); return; }
+  document.querySelectorAll(".soh-filter").forEach(s => { if (s !== el) s.value = activeSoh; });
+  destroyCharts();
+  RENDER[currentTab]();
 });
 
 // ═════════════════════════════════════════════════════════════════════════════
