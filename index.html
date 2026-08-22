@@ -676,6 +676,37 @@ function sohForCluster(name){
 }
 
 let RAW = null, activeSoh = 'all';
+
+// ── City → State mapping (used by the PM Adherence state filter) ──────────────
+// Name-based, same approach as SOH. Unmatched cities show as "Other".
+const STATE_REGIONS = [
+  { state:'Madhya Pradesh', cities:['indore','bhopal','jabalpur','gwalior','ujjain','sagar','ratlam','dewas','satna','rewa','katni','chhindwara','burhanpur','khandwa','khargone','morena','singrauli','vidisha','guna','shivpuri','mandsaur','neemuch','betul','damoh','hoshangabad','narmadapuram','sehore','chhatarpur','balaghat','seoni'] },
+  { state:'Maharashtra', cities:['mumbai','navi mumbai','thane','kalyan','vasai','virar','panvel','pune','pimpri','chinchwad','nagpur','nashik','nasik','aurangabad','sambhajinagar','solapur','amravati','kolhapur','sangli','satara','jalgaon','akola','latur','ahmednagar','ahilyanagar','nanded','dhule','chandrapur','parbhani','beed','ratnagiri','wardha','yavatmal','osmanabad','dharashiv','jalna','washim','gondia','bhandara','hingoli','buldhana','nandurbar'] },
+  { state:'Gujarat', cities:['ahmedabad','surat','vadodara','rajkot','bhavnagar','jamnagar','junagadh','gandhinagar','anand','nadiad','bharuch','navsari','valsad','morbi','mehsana','gandhidham','vapi','porbandar','veraval','palanpur','surendranagar','bhuj'] },
+  { state:'Rajasthan', cities:['jaipur','jodhpur','udaipur','kota','ajmer','bikaner','bhilwara','alwar','sikar','pali','ganganagar','bharatpur','tonk','hanumangarh','beawar','kishangarh','chittorgarh','banswara','sawai madhopur','jhunjhunu'] },
+  { state:'Uttar Pradesh', cities:['lucknow','kanpur','agra','varanasi','meerut','allahabad','prayagraj','ghaziabad','noida','bareilly','aligarh','moradabad','saharanpur','gorakhpur','firozabad','jhansi','muzaffarnagar','mathura','ayodhya','sitapur','mirzapur','jaunpur','rampur'] },
+  { state:'Karnataka', cities:['bangalore','bengaluru','mysore','mysuru','hubli','hubballi','dharwad','mangalore','mangaluru','belgaum','belagavi','davangere','ballari','bellary','shimoga','shivamogga','tumkur','tumakuru','hospet','raichur','bidar','kalaburagi','gulbarga','udupi','hassan','mandya','chitradurga','kolar'] },
+  { state:'Tamil Nadu', cities:['chennai','coimbatore','madurai','salem','tiruchirappalli','trichy','tirunelveli','vellore','erode','hosur','thoothukudi','tuticorin','dindigul','karur','namakkal','nagercoil','thanjavur','tiruppur','tirupur','cuddalore','kanchipuram','tiruvannamalai'] },
+  { state:'Telangana', cities:['hyderabad','secunderabad','warangal','karimnagar','nizamabad','khammam','mahbubnagar','ramagundam','nalgonda','adilabad','siddipet'] },
+  { state:'Andhra Pradesh', cities:['vijayawada','visakhapatnam','vizag','guntur','tirupati','nellore','kurnool','rajahmundry','kakinada','kadapa','anantapur','ongole','eluru','srikakulam','vizianagaram','chittoor'] },
+  { state:'Kerala', cities:['kochi','cochin','ernakulam','thiruvananthapuram','trivandrum','kozhikode','calicut','thrissur','kollam','kannur','palakkad','kottayam','malappuram','alappuzha'] },
+  { state:'Puducherry', cities:['pondicherry','puducherry'] },
+  { state:'Haryana', cities:['gurgaon','gurugram','faridabad','panipat','ambala','karnal','hisar','rohtak','sonipat','yamunanagar','panchkula','bhiwani','sirsa'] },
+  { state:'Punjab', cities:['ludhiana','amritsar','jalandhar','patiala','bathinda','mohali','hoshiarpur','pathankot','moga','firozpur'] },
+  { state:'Chhattisgarh', cities:['raipur','bhilai','bilaspur','korba','durg','rajnandgaon','raigarh'] },
+  { state:'West Bengal', cities:['kolkata','howrah','durgapur','asansol','siliguri'] },
+  { state:'Bihar', cities:['patna','gaya','bhagalpur','muzaffarpur','darbhanga'] },
+  { state:'Uttarakhand', cities:['dehradun','haridwar','roorkee','haldwani','rishikesh'] },
+  { state:'Goa', cities:['panaji','panjim','margao','vasco'] },
+];
+const DEFAULT_STATE = 'Other';
+function stateForCluster(name){
+  const n = String(name||'').toLowerCase();
+  for (const reg of STATE_REGIONS)
+    for (const city of reg.cities)
+      if (n.indexOf(city) !== -1) return reg.state;
+  return DEFAULT_STATE;
+}
 const SOH_RATIO_KEYS = {cpvPM:1,cpvBlended:1,vDayPM:1,vDayBlended:1,pctPmDone:1,cpvB2C:1,newHireCpv:1};
 function sohRecomputeTotals(list){
   const T = {};
@@ -2511,6 +2542,16 @@ function renderPMAdherence() {
   let  pmaSel = new Set(pmaAllCities);
   const pmaList = () => clusters.filter(c => pmaSel.has(c.cluster));
 
+  // ── state filter (PM Adherence only) ──
+  let pmaState = 'all';
+  const pmaStatesPresent = [...new Set(pmaAllCities.map(stateForCluster))].sort((a,b)=>a.localeCompare(b));
+  const stateOptionsHtml = () =>
+    `<option value="all">All states (${pmaAllCities.length})</option>` +
+    pmaStatesPresent.map(s=>{
+      const n = pmaAllCities.filter(ct=>stateForCluster(ct)===s).length;
+      return `<option value="${s}"${s===pmaState?' selected':''}>${s} (${n})</option>`;
+    }).join('');
+
   function pmaTotals(list) {
     const G = {
       pmDue:     list.reduce((s,c)=>s+(c.pmDue||0),0),
@@ -2690,6 +2731,7 @@ function renderPMAdherence() {
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:12px">
         <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
           <select class="soh-filter" style="padding:7px 12px;border:1.5px solid var(--line);border-radius:8px;background:#fff;color:var(--ink);font-size:12px;font-weight:600;cursor:pointer;font-family:inherit">${sohOptionsHtml()}</select>
+          <select id="pma-state" style="padding:7px 12px;border:1.5px solid var(--line);border-radius:8px;background:#fff;color:var(--ink);font-size:12px;font-weight:600;cursor:pointer;font-family:inherit">${stateOptionsHtml()}</select>
           <div style="position:relative">
             <button id="pma-city-btn" style="display:inline-flex;align-items:center;gap:8px;padding:7px 14px;border:1.5px solid var(--line);border-radius:8px;background:#fff;color:var(--ink);font-size:12px;font-weight:600;cursor:pointer;font-family:inherit">
               <span id="pma-city-label">All cities (${pmaAllCities.length})</span>
@@ -2901,6 +2943,17 @@ function renderPMAdherence() {
   document.getElementById('pma-city-none').addEventListener('click', () => {
     pmaSel = new Set();
     document.querySelectorAll('.pma-city-cb').forEach(cb => cb.checked = false);
+    pmaRefresh();
+  });
+
+  // ── state dropdown wiring ──
+  const stSel = document.getElementById('pma-state');
+  if (stSel) stSel.addEventListener('change', () => {
+    pmaState = stSel.value;
+    pmaSel = (pmaState === 'all')
+      ? new Set(pmaAllCities)
+      : new Set(pmaAllCities.filter(ct => stateForCluster(ct) === pmaState));
+    document.querySelectorAll('.pma-city-cb').forEach(cb => cb.checked = pmaSel.has(cb.value));
     pmaRefresh();
   });
 
