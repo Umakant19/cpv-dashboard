@@ -2637,7 +2637,7 @@ function renderPMAdherence() {
         <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
           <select id="pma-soh" style="padding:7px 12px;border:1.5px solid var(--line);border-radius:8px;background:#fff;color:var(--ink);font-size:12px;font-weight:600;cursor:pointer;font-family:inherit">
             <option value="all">All SOH (${pmaAllCities.length})</option>
-            ${SOH_LIST.map(h=>{const n=citiesForSoh(h).length;const reg=SOH_REGIONS.find(r=>r.head===h);const lbl=reg?reg.label:'Rest';return `<option value="${h}">${h} · ${lbl} (${n})</option>`;}).join('')}
+            ${SOH_LIST.map(h=>{const n=citiesForSoh(h).length;return `<option value="${h}">${h} (${n})</option>`;}).join('')}
           </select>
           <div style="position:relative">
             <button id="pma-city-btn" style="display:inline-flex;align-items:center;gap:8px;padding:7px 14px;border:1.5px solid var(--line);border-radius:8px;background:#fff;color:var(--ink);font-size:12px;font-weight:600;cursor:pointer;font-family:inherit">
