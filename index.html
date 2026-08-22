@@ -545,10 +545,10 @@ function monthProgress() {
       } else if (aY < target.year || (aY === target.year && aM < target.month)) {
         elapsed = 1;                               // data month hasn't started
       } else {
-        elapsed = asOf.getDate();                  // mid-month, the live case
+        elapsed = asOf.getDate() - 1;              // mid-month, live case — data lags refresh by 1 day
       }
     } else {
-      elapsed = asOf.getDate();
+      elapsed = asOf.getDate() - 1;                // no month label — same 1-day lag
     }
   }
   elapsed = Math.max(1, Math.min(elapsed, dim));
@@ -2668,6 +2668,7 @@ function renderPMAdherence() {
       const cpvPM   = c.cpvPM || 0;
       const vdayPM  = c.vDayPM || 0;
       const cm      = c.cm || 0;
+      const nhc     = nhcOf(c);
       // projection: SH-days needed to finish at current rate
       const projDays = rr > 0 ? (bal / rr / Math.max(forPM,1)).toFixed(1) : null;
       // month-end projection at this cluster's own calendar run rate
@@ -2721,6 +2722,11 @@ function renderPMAdherence() {
           <div style="background:var(--bg);border-radius:7px;padding:8px 10px">
             <div style="font-size:8.5px;text-transform:uppercase;letter-spacing:.1em;color:var(--ink-4)">V/Day PM</div>
             <div style="font-size:14px;font-weight:700;color:var(--ss-navy)">${vdayPM.toFixed(2)}</div>
+          </div>
+          <div style="background:var(--bg);border-radius:7px;padding:8px 10px">
+            <div style="font-size:8.5px;text-transform:uppercase;letter-spacing:.1em;color:var(--ink-4)">NHC</div>
+            <div style="font-size:14px;font-weight:700;color:var(--ss-navy)">${nhc>0?'₹'+inr(Math.round(nhc)):'—'}</div>
+            <div style="font-size:9px;color:var(--ink-4)">new-hire cost</div>
           </div>
         </div>
 
