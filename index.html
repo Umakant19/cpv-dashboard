@@ -817,7 +817,7 @@ function renderOverview() {
       <div class="stat">
         <div class="lbl">Total Visits B2C</div>
         <div class="val">${inr(totalVisits)}</div>
-        <div class="sub"><span><b>${inr(T.pmDone)}</b> PM</span><span><b>${inr(T.maas||0)}</b> MAAS</span><span><b>${inr(torqueBalance)}</b> Torque</span></div>
+        <div class="sub"><span><b>${inr((T.pmDone||0) - (T.maas||0))}</b> PM</span><span><b>${inr(T.maas||0)}</b> MAAS</span><span><b>${inr(torqueBalance)}</b> Torque</span></div>
       </div>
       <div class="stat">
         <div class="lbl">Cost PM (₹)</div>
