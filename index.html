@@ -281,8 +281,8 @@ tbody tr:last-child td{border-bottom:0}
       <div class="eye">Field operations · live</div>
       <h1>Cost per visit <em id="hdr-month">— loading</em></h1>
       <div class="month-tabs" role="tablist" id="month-tabs">
-        <button class="month-tab" data-month="july">July</button>
-        <button class="month-tab active" data-month="august">August</button>
+        <button class="month-tab" data-month="august">August</button>
+        <button class="month-tab active" data-month="september">September</button>
       </div>
       <div class="tabs" role="tablist">
         <button class="tab active" data-tab="overview">B2C Overview</button>
@@ -323,10 +323,10 @@ tbody tr:last-child td{border-bottom:0}
 // Paste your Apps Script web app URLs here after deploying WebApp.gs — one per month.
 // Until you do, the dashboard renders from embedded sample data.
 const MONTH_URLS = {
-  july: "https://script.google.com/macros/s/AKfycbw1kvdQFbjLmGepQvUAL4vBUW21kAMohO98Hzegyw9pLngnpGlV1nathvmq6bwhEpeS/exec",
-  august:"https://script.google.com/macros/s/AKfycbwdg3hFKOTriQCzp7V_cMwCu_yESFJxUcGm-Qh0-nyJyFjYf7uXDm2-Y70iMhi4eLv4/exec"
+  august:   "https://script.google.com/macros/s/AKfycbwdg3hFKOTriQCzp7V_cMwCu_yESFJxUcGm-Qh0-nyJyFjYf7uXDm2-Y70iMhi4eLv4/exec",
+  september:"https://script.google.com/macros/s/AKfycbyZ9fSX0jpo6vZQ4mHBYaQY-bYjPVnw7KJMBASLBoIfn3sV0WIUHiN94d4CGhVywsZVSw/exec"
 };
-let currentMonthKey = "august";
+let currentMonthKey = "september";
 const WEB_APP_URL = MONTH_URLS[currentMonthKey];   // ← kept for backward-compat with any code referencing it
 
 // ═════════════════════════════════════════════════════════════════════════════
