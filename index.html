@@ -920,11 +920,33 @@ function renderOverview() {
     `<div><span class="swatch" style="background:${p.color}"></span>${p.label} · <b>₹${inrShort(p.v)}</b> <span style="color:var(--ink-3)">${pct(p.v, tot)}</span></div>`
   ).join("");
 
+  // ─── B2C PM-only cost components ──────────────────────────────────────
+  // Uses per-component PM fields (e.g. reimbCostPM) when the payload has them.
+  // Otherwise the component is estimated: PM cost left after the known parts
+  // is spread across the remaining components in proportion to their B2C cost.
+  const sumC = k => DATA.clusters.reduce((s,c) => s + (+c[k]||0), 0);
+  const hasC = k => DATA.clusters.some(c => c[k] !== undefined && c[k] !== null && c[k] !== "");
+  const pmTotal = T.costPM || sumC("costPM");
+  const pmParts = costParts.map(p => {
+    const k = p.key + "PM";                       // salaryCost -> salaryCostPM
+    return hasC(k) ? { label: p.label, color: p.color, v: sumC(k), est: false }
+                   : { label: p.label, color: p.color, v: 0, est: true, base: T[p.key]||0 };
+  });
+  const knownPM = pmParts.filter(p => !p.est).reduce((s,p) => s + p.v, 0);
+  const estBase = pmParts.filter(p => p.est).reduce((s,p) => s + p.base, 0);
+  const leftPM  = Math.max(0, pmTotal - knownPM);
+  pmParts.forEach(p => { if (p.est) p.v = estBase ? leftPM * p.base / estBase : 0; });
+  const anyEst = pmParts.some(p => p.est && p.v > 0);
+  const pmLegend = pmParts.map(p =>
+    `<div><span class="swatch" style="background:${p.color}"></span>${p.label} · <b>${p.est ? "≈" : ""}₹${inrShort(p.v)}</b> <span style="color:var(--ink-3)">${pct(p.v, pmTotal)}</span></div>`
+  ).join("");
+
   document.getElementById("cost-comp-body").innerHTML = `
     <div class="card">
-      <h3>All cost components · ₹${inrShort(consolCost)} total</h3>
-      <div class="stack">${seg(allParts, consolCost)}</div>
-      <div class="stack-legend">${legend(allParts, consolCost)}</div>
+      <h3>B2C PM cost components · ₹${inrShort(pmTotal)} total</h3>
+      <div class="stack">${seg(pmParts, pmTotal)}</div>
+      <div class="stack-legend">${pmLegend}</div>
+      ${anyEst ? `<div style="margin-top:10px;font-size:11px;color:var(--ink-4)">≈ estimated — the payload has no PM split for these components, so the PM cost remaining after salary is allocated by each component's share of B2C cost.</div>` : ""}
     </div>
     ${(() => {
       const nhc = totalsNHC();
