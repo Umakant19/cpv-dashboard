@@ -339,31 +339,45 @@ const WEB_APP_URL = MONTH_URLS[currentMonthKey];   // ← kept for backward-comp
 let DATA = null;
 const dataCache = {}; // month key -> loaded payload, so re-switching doesn't refetch
 
-const inflight = {}; // month key -> pending request, so repeat clicks share one fetch
-
-// Fetches one month from its web app. Only updates the status bar when that
-// month is the one on screen, so a background load never overwrites it.
-async function fetchMonth(monthKey) {
+async function loadData(monthKey) {
+  monthKey = monthKey || currentMonthKey;
   const url = MONTH_URLS[monthKey];
-  const status = (t, d) => { if (monthKey === currentMonthKey) setStatus(t, d, false); };
+
+  if (dataCache[monthKey]) {
+    RAW = dataCache[monthKey];
+    applySohView();
+    setStatus("LIVE", "as of " + (RAW.meta && RAW.meta.asOf ? new Date(RAW.meta.asOf).toLocaleString() : "now"), false);
+    return true;
+  }
+
+  if (!url) {
+    DATA = null;
+    setStatus("NOT CONFIGURED", "no web app URL for " + monthKey, true);
+    return false;
+  }
+
   // Apps Script cold-starts can take 30s+ and throws occasional 429/500s,
   // so give each attempt a long timeout and retry with backoff.
-  const ATTEMPTS = 3, TIMEOUT_MS = 120000, BACKOFF = [3000, 8000];
-  let lastErr = null, lastStatus = 0;
+  const ATTEMPTS = 4, TIMEOUT_MS = 60000, BACKOFF = [1500, 4000, 8000];
+  let lastErr = null;
+  lastLoadStatus = 0;
 
   for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
-    status(attempt === 1 ? "LOADING…" : "RETRYING…",
-           attempt === 1 ? "fetching " + monthKey + " from sheet (can take up to a minute)"
-                         : monthKey + " · attempt " + attempt + " of " + ATTEMPTS);
+    setStatus(attempt === 1 ? "LOADING…" : "RETRYING…",
+              attempt === 1 ? "fetching from sheet (can take up to a minute)"
+                            : "attempt " + attempt + " of " + ATTEMPTS, false);
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
     try {
+      // Alternate the cache-buster: some Apps Script deployments 404 on a
+      // query string they don't expect, so every other attempt uses the bare
+      // /exec URL. Whichever works, works.
       const useCb = (attempt % 2 === 1);
       const res = await fetch(useCb ? url + "?cb=" + Date.now() : url,
                               { redirect: "follow", signal: ctrl.signal, cache: "no-store" });
       clearTimeout(timer);
       if (!res.ok) {
-        lastStatus = res.status;
+        lastLoadStatus = res.status;
         throw new Error("HTTP " + res.status +
           (res.status === 404 ? " (deployment not found)" :
            res.status === 429 ? " (rate limited)" :
@@ -374,50 +388,25 @@ async function fetchMonth(monthKey) {
       try { json = JSON.parse(text); }
       catch (_) { throw new Error(/<html/i.test(text) ? "got an HTML page, not JSON — check deployment access" : "invalid JSON response"); }
       if (json.error) throw new Error(json.error);
-      return json;
+      RAW = json;
+      dataCache[monthKey] = json;
+      applySohView();
+      setStatus("LIVE", "as of " + (json.meta && json.meta.asOf ? new Date(json.meta.asOf).toLocaleString() : "now")
+                        + (attempt > 1 ? " · loaded on attempt " + attempt : ""), false);
+      return true;
     } catch (e) {
       clearTimeout(timer);
       lastErr = (e && e.name === "AbortError") ? new Error("timed out after " + (TIMEOUT_MS / 1000) + "s") : e;
-      console.warn("loadData " + monthKey + " attempt " + attempt + " failed:", lastErr.message);
+      console.warn("loadData attempt " + attempt + " failed:", lastErr.message);
       if (attempt < ATTEMPTS) await new Promise(r => setTimeout(r, BACKOFF[attempt - 1]));
     }
   }
-  const err = lastErr || new Error("unknown error");
-  err.httpStatus = lastStatus;
-  throw err;
-}
 
-// Returns true only when monthKey is still the month on screen and its data
-// is now in RAW/DATA. A month the user has already left never touches RAW.
-async function loadData(monthKey) {
-  monthKey = monthKey || currentMonthKey;
-  const url = MONTH_URLS[monthKey];
-
-  if (!dataCache[monthKey]) {
-    if (!url) {
-      if (monthKey === currentMonthKey) { DATA = null; RAW = null; setStatus("NOT CONFIGURED", "no web app URL for " + monthKey, true); }
-      return false;
-    }
-    try {
-      if (!inflight[monthKey]) inflight[monthKey] = fetchMonth(monthKey).finally(() => { delete inflight[monthKey]; });
-      dataCache[monthKey] = await inflight[monthKey];
-    } catch (e) {
-      if (monthKey === currentMonthKey) {
-        DATA = null; RAW = null;
-        lastLoadError  = (e && e.message) || "unknown error";
-        lastLoadStatus = (e && e.httpStatus) || 0;
-        lastLoadUrl    = url;
-        setStatus("OFFLINE", "failed after 4 attempts — " + lastLoadError, true);
-      }
-      return false;
-    }
-  }
-
-  if (monthKey !== currentMonthKey) return false;   // user switched away while this loaded
-  RAW = dataCache[monthKey];
-  applySohView();
-  setStatus("LIVE", "as of " + (RAW.meta && RAW.meta.asOf ? new Date(RAW.meta.asOf).toLocaleString() : "now"), false);
-  return true;
+  DATA = null; RAW = null;
+  lastLoadError = lastErr && lastErr.message ? lastErr.message : "unknown error";
+  lastLoadUrl = url;
+  setStatus("OFFLINE", "failed after " + ATTEMPTS + " attempts — " + lastLoadError, true);
+  return false;
 }
 
 let lastLoadError = "";
@@ -425,7 +414,6 @@ let lastLoadError = "";
 async function retryLoad(monthKey) {
   document.getElementById("app").innerHTML = `<div class="loading"><span class="spin"></span>Loading data…</div>`;
   const ok = await loadData(monthKey);
-  if (monthKey !== currentMonthKey) return;   // user switched month meanwhile
   if (!ok) { showLoadError(monthKey); return; }
   renderHeader();
   destroyCharts();
@@ -932,33 +920,11 @@ function renderOverview() {
     `<div><span class="swatch" style="background:${p.color}"></span>${p.label} · <b>₹${inrShort(p.v)}</b> <span style="color:var(--ink-3)">${pct(p.v, tot)}</span></div>`
   ).join("");
 
-  // ─── B2C PM-only cost components ──────────────────────────────────────
-  // Uses per-component PM fields (e.g. reimbCostPM) when the payload has them.
-  // Otherwise the component is estimated: PM cost left after the known parts
-  // is spread across the remaining components in proportion to their B2C cost.
-  const sumC = k => DATA.clusters.reduce((s,c) => s + (+c[k]||0), 0);
-  const hasC = k => DATA.clusters.some(c => c[k] !== undefined && c[k] !== null && c[k] !== "");
-  const pmTotal = T.costPM || sumC("costPM");
-  const pmParts = costParts.map(p => {
-    const k = p.key + "PM";                       // salaryCost -> salaryCostPM
-    return hasC(k) ? { label: p.label, color: p.color, v: sumC(k), est: false }
-                   : { label: p.label, color: p.color, v: 0, est: true, base: T[p.key]||0 };
-  });
-  const knownPM = pmParts.filter(p => !p.est).reduce((s,p) => s + p.v, 0);
-  const estBase = pmParts.filter(p => p.est).reduce((s,p) => s + p.base, 0);
-  const leftPM  = Math.max(0, pmTotal - knownPM);
-  pmParts.forEach(p => { if (p.est) p.v = estBase ? leftPM * p.base / estBase : 0; });
-  const anyEst = pmParts.some(p => p.est && p.v > 0);
-  const pmLegend = pmParts.map(p =>
-    `<div><span class="swatch" style="background:${p.color}"></span>${p.label} · <b>${p.est ? "≈" : ""}₹${inrShort(p.v)}</b> <span style="color:var(--ink-3)">${pct(p.v, pmTotal)}</span></div>`
-  ).join("");
-
   document.getElementById("cost-comp-body").innerHTML = `
     <div class="card">
-      <h3>B2C PM cost components · ₹${inrShort(pmTotal)} total</h3>
-      <div class="stack">${seg(pmParts, pmTotal)}</div>
-      <div class="stack-legend">${pmLegend}</div>
-      ${anyEst ? `<div style="margin-top:10px;font-size:11px;color:var(--ink-4)">≈ estimated — the payload has no PM split for these components, so the PM cost remaining after salary is allocated by each component's share of B2C cost.</div>` : ""}
+      <h3>All cost components · ₹${inrShort(consolCost)} total</h3>
+      <div class="stack">${seg(allParts, consolCost)}</div>
+      <div class="stack-legend">${legend(allParts, consolCost)}</div>
     </div>
     ${(() => {
       const nhc = totalsNHC();
@@ -3504,7 +3470,6 @@ async function switchMonth(monthKey) {
   document.querySelectorAll(".month-tab").forEach(t => t.classList.toggle("active", t.dataset.month === monthKey));
   document.getElementById("app").innerHTML = `<div class="loading"><span class="spin"></span>Loading data…</div>`;
   const ok = await loadData(monthKey);
-  if (monthKey !== currentMonthKey) return;   // user switched month meanwhile
   if (!ok) { destroyCharts(); showLoadError(monthKey); return; }
   renderHeader();
   destroyCharts();
@@ -3521,12 +3486,8 @@ document.querySelectorAll(".month-tab").forEach(t => {
 (async () => {
   setChartDefaults();
   document.getElementById("app").innerHTML = `<div class="loading"><span class="spin"></span>Loading data…</div>`;
-  const bootMonth = currentMonthKey;
-  const ok = await loadData(bootMonth);
-  // warm the other months in the background so switching to them is instant
-  Object.keys(MONTH_URLS).forEach(m => { if (m !== bootMonth && !dataCache[m]) loadData(m); });
-  if (bootMonth !== currentMonthKey) return;  // user already switched month
-  if (!ok) { showLoadError(bootMonth); return; }
+  const ok = await loadData(currentMonthKey);
+  if (!ok) { showLoadError(currentMonthKey); return; }
   renderHeader();
   switchTab("overview");
 })();
