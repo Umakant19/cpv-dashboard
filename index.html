@@ -927,16 +927,18 @@ function renderOverview() {
   const sumC = k => DATA.clusters.reduce((s,c) => s + (+c[k]||0), 0);
   const hasC = k => DATA.clusters.some(c => c[k] !== undefined && c[k] !== null && c[k] !== "");
   const pmTotal = T.costPM || sumC("costPM");
-  const pmParts = costParts.map(p => {
-    const k = p.key + "PM";                       // salaryCost -> salaryCostPM
-    return hasC(k) ? { label: p.label, color: p.color, v: sumC(k), est: false }
-                   : { label: p.label, color: p.color, v: 0, est: true, base: T[p.key]||0 };
-  });
-  const knownPM = pmParts.filter(p => !p.est).reduce((s,p) => s + p.v, 0);
-  const estBase = pmParts.filter(p => p.est).reduce((s,p) => s + p.base, 0);
-  const leftPM  = Math.max(0, pmTotal - knownPM);
-  pmParts.forEach(p => { if (p.est) p.v = estBase ? leftPM * p.base / estBase : 0; });
-  const anyEst = pmParts.some(p => p.est && p.v > 0);
+  // Exact PM split only when EVERY component has a PM field and they add up to
+  // Cost PM (within 5%). Otherwise Cost PM is divided by each component's share
+  // of B2C cost — a partial or badly-filled field (e.g. salaryCostPM) is ignored.
+  const b2cBase  = costParts.reduce((s,p) => s + (T[p.key]||0), 0);
+  const exact    = costParts.map(p => hasC(p.key + "PM") ? sumC(p.key + "PM") : null);
+  const exactSum = exact.reduce((s,v) => s + (v||0), 0);
+  const useExact = exact.every(v => v !== null) && pmTotal > 0 && Math.abs(exactSum - pmTotal) <= pmTotal * 0.05;
+  const pmParts  = costParts.map((p, i) => ({
+    label: p.label, color: p.color, est: !useExact,
+    v: useExact ? exact[i] : (b2cBase ? pmTotal * (T[p.key]||0) / b2cBase : 0),
+  }));
+  const anyEst = !useExact;
   const pmLegend = pmParts.map(p =>
     `<div><span class="swatch" style="background:${p.color}"></span>${p.label} · <b>${p.est ? "≈" : ""}₹${inrShort(p.v)}</b> <span style="color:var(--ink-3)">${pct(p.v, pmTotal)}</span></div>`
   ).join("");
