@@ -348,7 +348,7 @@ async function fetchMonth(monthKey) {
   const status = (t, d) => { if (monthKey === currentMonthKey) setStatus(t, d, false); };
   // Apps Script cold-starts can take 30s+ and throws occasional 429/500s,
   // so give each attempt a long timeout and retry with backoff.
-  const ATTEMPTS = 4, TIMEOUT_MS = 60000, BACKOFF = [1500, 4000, 8000];
+  const ATTEMPTS = 3, TIMEOUT_MS = 120000, BACKOFF = [3000, 8000];
   let lastErr = null, lastStatus = 0;
 
   for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
