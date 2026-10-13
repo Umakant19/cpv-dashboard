@@ -754,12 +754,22 @@ function applyCpvPmNet_(raw){
   if (!raw || raw.__cpvPmNet) return;
   (raw.clusters || []).forEach(c => {
     c.cpvPMGross = +c.cpvPM || 0;
-    c.cpvPM = cpvPmNet(c.cpvPMGross, nhcCpvBest(c, nhcOf(c), c.tvAdj || 0));
+    const sc = nhcCpvSheet(c), nc = nhcOf(c), tv = +c.tvAdj || 0;
+    const nhcCpvC = (sc !== null && sc > 0) ? sc : (tv > 0 ? nc / tv : 0);
+    c.cpvPM = cpvPmNet(c.cpvPMGross, nhcCpvC);
   });
   if (raw.totals) {
-    const T = raw.totals;
+    const T = raw.totals, cl = raw.clusters || [];
+    // Totals often arrive WITHOUT newHireCost / newHireCpv (older web-app versions),
+    // so rebuild them from the clusters when missing — otherwise NHC/visit = 0.
+    const nhcTot = nhcOf(T) || cl.reduce((s, c) => s + nhcOf(c), 0);
+    const tvTot  = (+T.tvAdj || 0) || cl.reduce((s, c) => s + (+c.tvAdj || 0), 0);
+    const sheetT = nhcCpvSheet(T);
+    const nhcCpvT = (sheetT !== null && sheetT > 0) ? sheetT : (tvTot > 0 ? nhcTot / tvTot : 0);
+    if (!nhcOf(T) && nhcTot) T.newHireCost = nhcTot;
+    if (!(sheetT > 0) && nhcCpvT) T.newHireCpv = nhcCpvT;
     T.cpvPMGross = +T.cpvPM || 0;
-    T.cpvPM = cpvPmNet(T.cpvPMGross, nhcCpvBest(T, nhcOf(T), T.tvAdj || 0));
+    T.cpvPM = cpvPmNet(T.cpvPMGross, nhcCpvT);
   }
   raw.__cpvPmNet = true;
 }
@@ -827,7 +837,7 @@ function renderOverview() {
       <div class="stat headline">
         <div class="lbl">CPV — PM (headline, ex-NHC)</div>
         <div class="val"><span class="cur">₹</span>${inr(T.cpvPM)}</div>
-        <div class="sub"><span>Cost PM ÷ PM+TM visits − NHC/visit</span><span>gross ₹${inr(T.cpvPMGross||0)}</span></div>
+        <div class="sub"><span>Cost PM ÷ PM+TM visits − NHC/visit</span><span>gross ₹${inr(T.cpvPMGross||0)} − NHC ₹${((T.cpvPMGross||0)-(T.cpvPM||0)).toFixed(1)}</span></div>
       </div>
       <div class="stat">
         <div class="lbl">#SH Count — B2C</div>
