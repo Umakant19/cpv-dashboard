@@ -2586,7 +2586,8 @@ function redrawClusterSH() {
 let pmState = { selected: 'ALL' };  // 'ALL' or a cluster name
 
 function renderPMAdherence() {
-  const clusters = (DATA.clusters || []).filter(c => (c.pmDue||0) > 0 || (c.pmDone||0) > 0);
+  // include clusters with PM cost even if no PM due/done yet (e.g. Kota) so totals match the Overview
+  const clusters = (DATA.clusters || []).filter(c => (c.pmDue||0) > 0 || (c.pmDone||0) > 0 || (c.costPM||0) > 0);
   if (!clusters.length) {
     document.getElementById('app').innerHTML = '<div class="section" style="margin-top:0"><p style="color:var(--ink-3);padding:40px">No PM data available.</p></div>';
     return;
