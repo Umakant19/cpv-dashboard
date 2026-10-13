@@ -708,7 +708,7 @@ function stateForCluster(name){
       if (n.indexOf(city) !== -1) return reg.state;
   return DEFAULT_STATE;
 }
-const SOH_RATIO_KEYS = {cpvPM:1,cpvBlended:1,vDayPM:1,vDayBlended:1,pctPmDone:1,cpvB2C:1,newHireCpv:1};
+const SOH_RATIO_KEYS = {cpvPM:1,cpvPMGross:1,cpvBlended:1,vDayPM:1,vDayBlended:1,pctPmDone:1,cpvB2C:1,newHireCpv:1};
 function sohRecomputeTotals(list){
   const T = {};
   list.forEach(c => Object.keys(c).forEach(k => {
@@ -719,6 +719,8 @@ function sohRecomputeTotals(list){
   T.vDayBlended = T.manDays   ? T.totalVisits/T.manDays : 0;
   T.vDayPM      = T.pmManDays ? T.pmDone/T.pmManDays    : 0;
   T.newHireCpv  = T.tvAdj     ? T.newHireCost/T.tvAdj   : 0;
+  T.cpvPMGross  = T.cpvPM;
+  T.cpvPM       = cpvPmNet(T.cpvPMGross, T.newHireCpv);   // net of NHC
   return T;
 }
 function sohRecomputeB2b(b2b){
@@ -743,7 +745,25 @@ function buildSohView(raw, head){
   v.__nhcSH        = null;
   return v;
 }
-function applySohView(){ DATA = buildSohView(RAW, activeSoh); }
+// ── CPV-PM NET OF NEW HIRE COST ──────────────────────────────────────────────
+// Every CPV-PM shown in the dashboard = CPV-PM (Cost PM ÷ PM+TM Adj)
+//                                       − New Hire CPV (NHC ÷ TV Adj, sheet col "New Hire CPV").
+// The original value is kept as cpvPMGross.
+function cpvPmNet(cpvGross, nhcCpv){ const g = +cpvGross || 0; return g > 0 ? Math.max(0, g - (+nhcCpv || 0)) : 0; }
+function applyCpvPmNet_(raw){
+  if (!raw || raw.__cpvPmNet) return;
+  (raw.clusters || []).forEach(c => {
+    c.cpvPMGross = +c.cpvPM || 0;
+    c.cpvPM = cpvPmNet(c.cpvPMGross, nhcCpvBest(c, nhcOf(c), c.tvAdj || 0));
+  });
+  if (raw.totals) {
+    const T = raw.totals;
+    T.cpvPMGross = +T.cpvPM || 0;
+    T.cpvPM = cpvPmNet(T.cpvPMGross, nhcCpvBest(T, nhcOf(T), T.tvAdj || 0));
+  }
+  raw.__cpvPmNet = true;
+}
+function applySohView(){ applyCpvPmNet_(RAW); DATA = buildSohView(RAW, activeSoh); }
 
 // Reusable <option> list for any SOH selector; marks the active head selected.
 function sohOptionsHtml(){
@@ -805,9 +825,9 @@ function renderOverview() {
   const html = `
     <div class="hero hero-pm">
       <div class="stat headline">
-        <div class="lbl">CPV — PM (headline)</div>
+        <div class="lbl">CPV — PM (headline, ex-NHC)</div>
         <div class="val"><span class="cur">₹</span>${inr(T.cpvPM)}</div>
-        <div class="sub"><span>Cost PM ÷ PM+TM visits</span></div>
+        <div class="sub"><span>Cost PM ÷ PM+TM visits − NHC/visit</span><span>gross ₹${inr(T.cpvPMGross||0)}</span></div>
       </div>
       <div class="stat">
         <div class="lbl">#SH Count — B2C</div>
@@ -1099,7 +1119,7 @@ function renderQuadrant() {
     <div class="section" style="margin-top:0">
       <div class="eye">Cost efficiency by cluster</div>
       <h2>Who's above and below the line</h2>
-      <p class="lead">Each cluster's <b>CPV·PM versus the company average of ₹${inr(T.cpvPM)}</b>. Bars to the <b style="color:var(--danger)">right (red)</b> cost more than average — these are draining money. Bars to the <b style="color:var(--good)">left (green)</b> are cheaper than average — your efficient clusters. The longer the bar, the bigger the gap.</p>
+      <p class="lead">Each cluster's <b>CPV·PM (net of new-hire cost) versus the company average of ₹${inr(T.cpvPM)}</b>. Bars to the <b style="color:var(--danger)">right (red)</b> cost more than average — these are draining money. Bars to the <b style="color:var(--good)">left (green)</b> are cheaper than average — your efficient clusters. The longer the bar, the bigger the gap.</p>
 
       <div class="card">
         <div class="chart-box" style="height:620px"><canvas id="ch-quadrant"></canvas></div>
@@ -1119,7 +1139,7 @@ function renderQuadrant() {
 
         <div class="card">
           <h3>Most efficient (cheapest CPV)</h3>
-          <div class="desc">CPV — PM (lowest first)</div>
+          <div class="desc">CPV — PM ex-NHC (lowest first)</div>
           <div class="rank-list">${byCpvBest.map((c,i) => `
             <div class="rank-item good">
               <span class="pos">${i+1}</span>
@@ -1233,7 +1253,7 @@ function renderClusters() {
               <th data-k="nhcCpv">NHC / visit</th>
               <th data-k="vDayPM">V/Day PM</th>
               <th data-k="vDayBlended">V/Day Bld</th>
-              <th data-k="cpvPM">CPV·PM</th>
+              <th data-k="cpvPM">CPV·PM (ex-NHC)</th>
               <th data-k="cpvBlended">CPV·Bld</th>
             </tr></thead>
             <tbody id="tbody"></tbody>
@@ -1308,7 +1328,8 @@ function renderTblBody() {
   const tCost = sum('totalCost'), tCostPM = sum('costPM');
   const tPmTm = sum('pmTmAdj'), tTvAdj = sum('tvAdj');
   const tManDays = sum('manDays'), tPmManDays = sum('pmManDays'), tPmDone = sum('pmDone');
-  const cpvPM = tPmTm ? Math.round(tCostPM / tPmTm) : 0;
+  const tNhc = filtered.reduce((a,c)=>a+nhcOf(c),0);
+  const cpvPM = Math.round(cpvPmNet(tPmTm ? tCostPM / tPmTm : 0, tTvAdj ? tNhc / tTvAdj : 0));   // net of NHC
   const cpvBld = tTvAdj ? Math.round(tCost / tTvAdj) : 0;
   const vdayPM = tPmManDays ? (tPmDone / tPmManDays) : 0;
   const vdayBld = tManDays ? (sum('totalVisits') / tManDays) : 0;
@@ -1670,7 +1691,7 @@ function renderDDResults(rows) {
           </div>`;
           })()}
           <div class="kpi-mini">
-            <div class="k-lbl">Cluster CPV PM</div>
+            <div class="k-lbl">Cluster CPV PM (ex-NHC)</div>
             <div class="k-val">${clusterCpvPM > 0 ? '₹' + inr(clusterCpvPM) : '—'}</div>
             <div class="k-sub">vs ₹${inr(overallAvgPM)} overall</div>
           </div>
@@ -2594,7 +2615,8 @@ function renderPMAdherence() {
     };
     G.pctDone = G.pmDue > 0 ? (G.pmDone / G.pmDue * 100) : 0;
     G.balance = Math.max(0, G.pmDue - G.pmDone);
-    G.cpvPM   = G.pmTmAdj   > 0 ? G.costPM / G.pmTmAdj  : 0;
+    G.cpvPMGross = G.pmTmAdj > 0 ? G.costPM / G.pmTmAdj  : 0;
+    G.cpvPM   = cpvPmNet(G.cpvPMGross, G.tvAdj > 0 ? G.newHireCost / G.tvAdj : 0);   // net of NHC
     G.vDayPM  = G.pmManDays > 0 ? G.pmDone / G.pmManDays : 0;
     G.nhcCpv  = G.tvAdj > 0 ? G.newHireCost / G.tvAdj : 0;
     G.runRate = G.pmManDays > 0 ? G.pmDone / G.pmManDays : 0;
@@ -2642,9 +2664,9 @@ function renderPMAdherence() {
           <div class="pct">${inr(G.forPM)} on PM duty</div>
         </div>
         <div class="cost-tile">
-          <div class="lbl">CPV — PM</div>
+          <div class="lbl">CPV — PM (ex-NHC)</div>
           <div class="val"><span class="cur">₹</span>${inr(Math.round(G.cpvPM))}</div>
-          <div class="pct">Cost PM ÷ adj. visits</div>
+          <div class="pct">Cost PM ÷ adj. visits − NHC/visit</div>
         </div>
         <div class="cost-tile">
           <div class="lbl">V/Day — PM</div>
@@ -2864,7 +2886,7 @@ function renderPMAdherence() {
             <div style="font-size:9px;color:var(--ink-4)">PM/SH-day</div>
           </div>
           <div style="background:var(--bg);border-radius:7px;padding:8px 10px">
-            <div style="font-size:8.5px;text-transform:uppercase;letter-spacing:.1em;color:var(--ink-4)">CPV-PM</div>
+            <div style="font-size:8.5px;text-transform:uppercase;letter-spacing:.1em;color:var(--ink-4)">CPV-PM (ex-NHC)</div>
             <div style="font-size:14px;font-weight:700;color:var(--ss-navy)">${cpvPM>0?'₹'+inr(Math.round(cpvPM)):'—'}</div>
           </div>
           <div style="background:var(--bg);border-radius:7px;padding:8px 10px">
@@ -3037,7 +3059,7 @@ function renderPMACluster(clusterName) {
     { lbl:'Run Rate',       val:rr.toFixed(2),                 sub:'PM visits/SH-day',    col:'var(--ss-navy)' },
     { lbl:'SH-days to close',val:projDays?inr(Math.round(projDays*forPM)):'—', sub:`at ${rr.toFixed(1)} rate`, col:projDays&&+projDays<=5?'var(--good)':'var(--warn)' },
     { lbl:'Active SHs',     val:shs,                           sub:`${forPM} on PM · ${forCM} CM`, col:'var(--ink)' },
-    { lbl:'CPV — PM',       val:cpvPM>0?'₹'+inr(Math.round(cpvPM)):'—', sub:'cost÷adj.visits', col:'var(--ss-navy)' },
+    { lbl:'CPV — PM (ex-NHC)', val:cpvPM>0?'₹'+inr(Math.round(cpvPM)):'—', sub:'cost÷adj.visits − NHC/visit', col:'var(--ss-navy)' },
     { lbl:'V/Day PM',       val:vdayPM.toFixed(2),             sub:'PM÷PM man-days',      col:'var(--ss-navy)' },
   ].map(k=>`<div class="cost-tile" style="flex:1;min-width:130px">
     <div class="lbl">${k.lbl}</div>
