@@ -3612,6 +3612,43 @@ function cpvAnatomyHtml() {
     </div>`;
 }
 
+// Explains WHY the extras are missing, from what the web app actually returned
+function extrasDiagHtml() {
+  const R = RAW || {};
+  const url = MONTH_URLS[currentMonthKey] || "";
+  const err = R.cpvBreakdownError || R.shCostsError || "";
+  const ran = ["cpvExtrasVersion", "cpvBreakdown", "cpvBreakdownError", "shCosts", "shCostsError"].some(k => k in R);
+  const keys = Object.keys(R).filter(k => k.indexOf("__") !== 0);
+  const m = R.meta || {};
+  let what;
+  if (ran && err) {
+    what = `<b>addCpvExtras ran, but it failed:</b><br><code style="white-space:pre-wrap">${escHtml(err)}</code>` +
+      (/no spreadsheet|null|getSheetByName/i.test(err)
+        ? `<br><br>Your WebApp.gs opens the sheet by ID, so pass that sheet in:<br><code>payload = addCpvExtras(payload, SpreadsheetApp.openById("YOUR_SHEET_ID"));</code>`
+        : /not found/i.test(err) ? `<br><br>A sheet or column name in this month's file is different from October's — rename it back, or tell Claude the new name.` : "");
+  } else if (ran) {
+    what = `<b>addCpvExtras ran but sent an empty breakdown</b> — check that "CPV - B2C Actuals" has data rows under "Sorted Cluster".`;
+  } else {
+    what = `<b>The web app answering this link is still running the old code — <code>addCpvExtras</code> never ran.</b>
+      <ol style="margin:10px 0 0 18px;padding:0;line-height:1.75">
+        <li>In Apps Script, run <b>testCpvExtras</b> (select it ▸ Run ▸ Execution log). If it logs "cpvBreakdown OK", the code is fine — go to step 3.</li>
+        <li>In WebApp.gs, inside <code>doGet</code>, change the return line to wrap your payload variable:<br>
+            <code>return ContentService.createTextOutput(JSON.stringify(addCpvExtras(payload)))…</code><br>
+            (use your own variable name; this works even if it is a <code>const</code>). The line must run <i>before</i> the <code>return</code>, and before any cached copy is returned.</li>
+        <li><b>Deploy ▸ Manage deployments</b> ▸ pick the <b>${escHtml(currentMonthKey)}</b> deployment ▸ ✏️ Edit ▸ Version: <b>New version</b> ▸ Deploy. Saving the code is not enough, and "New deployment" makes a different link that this dashboard doesn't call.</li>
+        <li>If WebApp.gs caches the JSON (CacheService), clear it or wait for it to expire. Then hard-refresh this page (Ctrl+Shift+R).</li>
+      </ol>`;
+  }
+  return `<div style="background:var(--warn-soft);border:1px solid var(--warn);border-radius:10px;padding:20px;color:#5c3d00;margin-top:20px;line-height:1.6;font-size:13px">
+      ${what}
+      <div style="margin-top:14px;padding-top:12px;border-top:1px dashed var(--warn);font-size:11px;font-family:'JetBrains Mono',monospace;color:var(--ink-3);word-break:break-all">
+        Link called (${escHtml(currentMonthKey)}): ${escHtml(url)}<br>
+        Payload version: ${escHtml(m.version || "—")} · as of: ${escHtml(m.asOf || "—")} · extras: ${ran ? "v" + escHtml(R.cpvExtrasVersion || "?") : "not present"}<br>
+        Keys received: ${escHtml(keys.join(", "))}
+      </div>
+    </div>`;
+}
+
 // ── CPV BREAKDOWN TAB ────────────────────────────────────────────────────────
 let bdState = { sort: "cpv", asc: false, q: "" };
 
@@ -3621,11 +3658,7 @@ function renderCpvBreakdown() {
     document.getElementById("app").innerHTML = `
       <div class="section" style="margin-top:0">
         <div class="eye">Cost per visit · breakdown</div><h2>CPV breakdown</h2>
-        <div style="background:var(--warn-soft);border:1px solid var(--warn);border-radius:10px;padding:20px;color:#7a5000;margin-top:20px;line-height:1.6">
-          <b>CPV breakdown is not in this payload.</b> In WebApp.gs add <code>payload = addCpvExtras(payload);</code> before the JSON is returned
-          (function is in <b>CPV_SH_Costs.gs</b>), then deploy a new version of the same deployment.
-          ${RAW && RAW.cpvBreakdownError ? `<br>Last error: <code>${escHtml(RAW.cpvBreakdownError)}</code>` : ""}
-        </div>
+        ${extrasDiagHtml()}
       </div>`;
     return;
   }
@@ -3802,8 +3835,10 @@ let csh2 = { cluster: "ALL", q: "", view: "amount", sort: "totalCost", asc: fals
 function renderClusterSH() {
   const all = DATA.shCosts || [];
   if (!all.length) {
-    if (RAW && RAW.shCostsError) console.warn("shCosts error from WebApp:", RAW.shCostsError);
-    return renderClusterSHLegacy();
+    renderClusterSHLegacy();
+    const sec = document.querySelector("#app .section");
+    if (sec) sec.insertAdjacentHTML("afterbegin", `<div style="margin-bottom:18px"><b style="color:var(--ss-navy)">Real SH costs (salary / incentive / reimbursement) are not in this payload.</b>${extrasDiagHtml()}</div>`);
+    return;
   }
   const M = (RAW && RAW.shCostsMeta) || {};
   const clusters = [...new Set(all.map(r => r.cluster))].sort((a, b) => String(a).localeCompare(String(b)));
