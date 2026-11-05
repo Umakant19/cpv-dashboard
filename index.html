@@ -3981,6 +3981,28 @@ function redrawClusterSH2() {
         ${mini(`SHs with ₹0 salary — not in ${escHtml(M.salaryTab || "the salary sheet")}`, ["EMP", "Name", "Cluster", "Visits"],
           zeroSal.sort((a, b) => (b.visits || 0) - (a.visits || 0)).map(r => `<tr><td style="text-align:left;font-family:'JetBrains Mono',monospace;font-size:10.5px">${escHtml(r.empCode)}</td><td style="text-align:left">${escHtml(r.name)}</td><td style="text-align:left">${escHtml(r.cluster)}</td><td>${inr(r.visits || 0)}</td></tr>`))}
       </div>
+      ${isAll && activeSoh === "all" && M.reimbursement && M.reimbursement.notSHList && M.reimbursement.notSHList.length ? (() => {
+        const list = M.reimbursement.notSHList;
+        const by = M.reimbursement.notSHByBucket || {};
+        const buckets = Object.keys(by).filter(k => by[k] > 0);
+        const bucketColor = b => b === "B2B" ? "var(--b2b)" : b.indexOf("B2C") === 0 ? "var(--good)" : b.indexOf("Not") === 0 ? "var(--danger)" : "var(--ink-3)";
+        const bucketBg    = b => b === "B2B" ? "var(--b2b-soft)" : b.indexOf("B2C") === 0 ? "var(--good-soft)" : b.indexOf("Not") === 0 ? "var(--danger-soft)" : "var(--bg-2)";
+        const chips = buckets.map(b => `<span style="display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:12px;background:${bucketBg(b)};color:${bucketColor(b)};font-size:10.5px;font-weight:700;margin:2px 4px 2px 0">${escHtml(b)} · ₹${inr(by[b])} · ${list.filter(e => e.bucket === b).length}</span>`).join("");
+        const tbl = (title, rows) => rows.length ? `<details style="margin-top:10px"><summary style="cursor:pointer;font-weight:600;color:var(--ss-navy);font-size:12px">${escHtml(title)} · ₹${inr(rows.reduce((s,e)=>s+e.amount,0))} · ${rows.length} entries</summary>
+            <table style="width:100%;border-collapse:collapse;font-size:11.5px;margin-top:8px">
+              <thead><tr style="color:var(--ink-3);font-size:10px;text-transform:uppercase;letter-spacing:.07em;background:var(--bg-2)">
+                <th style="text-align:left;padding:5px 8px">EMP Code</th><th style="text-align:left;padding:5px 8px">Name</th>
+                <th style="text-align:left;padding:5px 8px">Cluster</th><th style="text-align:left;padding:5px 8px">Role</th>
+                <th style="text-align:right;padding:5px 8px">Claimed ₹</th></tr></thead>
+              <tbody>${rows.map(e => `<tr style="border-top:1px solid var(--line)"><td style="text-align:left;padding:5px 8px;font-family:'JetBrains Mono',monospace;font-size:10.5px">${escHtml(e.code)}</td><td style="text-align:left;padding:5px 8px;font-weight:500">${escHtml(e.name) || '<span style="color:var(--ink-4)">(no name)</span>'}</td><td style="text-align:left;padding:5px 8px;color:var(--ink-3)">${escHtml(e.cluster) || "—"}</td><td style="text-align:left;padding:5px 8px;color:var(--ink-3);font-size:11px">${escHtml(e.team || e.designation || e.status || "—")}</td><td style="text-align:right;padding:5px 8px;font-weight:600">₹${inr(e.amount)}</td></tr>`).join("")}</tbody>
+            </table></details>` : "";
+        return `<div class="card" style="margin-top:14px;padding:14px 16px;border-left:3px solid var(--warn)">
+          <h3 style="font-size:12.5px;margin:0 0 4px">Reimbursement for non-B2C codes · ₹${inr(M.reimbursement.notSH)} bifurcation</h3>
+          <div style="font-size:11px;color:var(--ink-3);margin-bottom:8px">Claims in the Reimbursement tab whose EMP code is not a B2C service hero. Tap a block to see who.</div>
+          <div>${chips}</div>
+          ${buckets.map(b => tbl(b, list.filter(e => e.bucket === b))).join("")}
+        </div>`;
+      })() : ""}
       </div>
     </div>`;
   const dqBtn = document.getElementById("csh-dq-btn"), dqPanel = document.getElementById("csh-dq-panel");
