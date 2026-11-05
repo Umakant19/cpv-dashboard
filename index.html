@@ -267,9 +267,14 @@ tbody tr:last-child td{border-bottom:0}
 .csh-tbl{font-size:11.5px}
 .csh-tbl thead th{padding:10px 10px;font-size:9.5px}
 .csh-tbl tbody td{padding:7px 10px;white-space:nowrap}
-.csh-dq{background:#fff;border:1px solid var(--line);border-radius:10px;padding:12px 16px;margin-top:14px;font-size:12px;color:var(--ink-2)}
-.csh-dq summary{cursor:pointer;font-weight:600;color:var(--ss-navy)}
-.csh-dq summary b{color:var(--danger)}
+.csh-dq{margin-top:14px;font-size:12px;color:var(--ink-2)}
+.csh-dq-btn{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border:1px solid var(--line);border-radius:14px;background:#fff;color:var(--ink-3);font-size:11px;font-weight:600;font-family:inherit;cursor:pointer;transition:all .15s}
+.csh-dq-btn:hover{border-color:var(--ss-amber);color:var(--ss-navy)}
+.csh-dq-btn .plus{display:inline-flex;width:14px;height:14px;align-items:center;justify-content:center;border-radius:50%;background:var(--ss-navy);color:#fff;font-size:10px;font-weight:700;line-height:1}
+.csh-dq-btn.open .plus{background:var(--ss-amber)}
+.csh-dq-panel{display:none;background:#fff;border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin-top:10px}
+.csh-dq-panel.open{display:block}
+.csh-dq b{color:var(--danger)}
 
 @media (max-width:1100px){
   .hero{grid-template-columns:repeat(3,1fr)}
@@ -3964,8 +3969,10 @@ function redrawClusterSH2() {
                      : `<div style="font-size:11.5px;color:var(--good);margin-top:6px">Nothing to fix here ✓</div>`}
     </div>`;
   document.getElementById("csh-dq").innerHTML = `
-    <details class="csh-dq">
-      <summary>Data checks — incentive not matched <b>₹${inr(incSum)}</b> (${inc.length}) · reimbursement set to ₹0 <b>₹${inr(rbzSum)}</b> (${rbz.length}) · <b>${zeroSal.length}</b> SHs with ₹0 salary${isAll && activeSoh === "all" && M.reimbursement ? ` · reimbursement for non-SH / B2B codes <b>₹${inrShort(M.reimbursement.notSH || 0)}</b>` : ""}</summary>
+    <div class="csh-dq">
+      <button class="csh-dq-btn" id="csh-dq-btn" aria-expanded="false" title="Show the incentive / reimbursement / zero-salary data checks"><span class="plus">+</span> Data checks</button>
+      <div class="csh-dq-panel" id="csh-dq-panel">
+        <div style="font-size:12px;color:var(--ink-2);margin-bottom:10px">Incentive not matched <b>₹${inr(incSum)}</b> (${inc.length}) · reimbursement set to ₹0 <b>₹${inr(rbzSum)}</b> (${rbz.length}) · <b>${zeroSal.length}</b> SHs with ₹0 salary${isAll && activeSoh === "all" && M.reimbursement ? ` · reimbursement for non-SH / B2B codes <b>₹${inrShort(M.reimbursement.notSH || 0)}</b>` : ""}</div>
       <div class="grid-3" style="margin-top:12px">
         ${mini("Incentive not matched to an SH — fix the name in Incentive Data", ["Scheme", "Name", "Cluster", "₹"],
           inc.sort((a, b) => b.amount - a.amount).map(e => `<tr><td style="text-align:left;font-weight:500">${escHtml(e.scheme)}</td><td style="text-align:left">${escHtml(e.name)}</td><td style="text-align:left">${escHtml(e.cluster)}</td><td>${inr(e.amount)}</td></tr>`))}
@@ -3974,7 +3981,15 @@ function redrawClusterSH2() {
         ${mini(`SHs with ₹0 salary — not in ${escHtml(M.salaryTab || "the salary sheet")}`, ["EMP", "Name", "Cluster", "Visits"],
           zeroSal.sort((a, b) => (b.visits || 0) - (a.visits || 0)).map(r => `<tr><td style="text-align:left;font-family:'JetBrains Mono',monospace;font-size:10.5px">${escHtml(r.empCode)}</td><td style="text-align:left">${escHtml(r.name)}</td><td style="text-align:left">${escHtml(r.cluster)}</td><td>${inr(r.visits || 0)}</td></tr>`))}
       </div>
-    </details>`;
+      </div>
+    </div>`;
+  const dqBtn = document.getElementById("csh-dq-btn"), dqPanel = document.getElementById("csh-dq-panel");
+  if (dqBtn && dqPanel) dqBtn.addEventListener("click", () => {
+    const open = !dqPanel.classList.contains("open");
+    dqPanel.classList.toggle("open", open); dqBtn.classList.toggle("open", open);
+    dqBtn.setAttribute("aria-expanded", open ? "true" : "false");
+    dqBtn.innerHTML = (open ? '<span class="plus">−</span> Hide data checks' : '<span class="plus">+</span> Data checks');
+  });
 
   // ── tables ──
   const s = csh2.sort;
