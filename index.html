@@ -3629,14 +3629,21 @@ function extrasDiagHtml() {
   } else if (ran) {
     what = `<b>addCpvExtras ran but sent an empty breakdown</b> — check that "CPV - B2C Actuals" has data rows under "Sorted Cluster".`;
   } else {
-    what = `<b>The web app answering this link is still running the old code — <code>addCpvExtras</code> never ran.</b>
+    const ver = escHtml(m.version || "?");
+    const prefix = String(m.version || "").split("-")[0];
+    const libHint = /^[A-Z]{2,5}$/.test(prefix) && prefix !== "v"
+      ? `<div style="margin-top:10px;padding:10px 12px;background:rgba(255,255,255,.6);border-left:3px solid var(--warn);border-radius:4px">
+           <b>"${escHtml(prefix)}-" in the version tells me this /exec is fed by a <u>library</u>, not by the project you've been editing.</b>
+           Open the project behind this /exec (the one you keep pressing Deploy on) ▸ Settings ⚙ ▸ scroll to <b>Libraries</b> ▸ delete the row ▸ <b>Save</b>.
+           Then paste the full WebApp.gs v3.0 into that project's main <code>.gs</code> file.
+         </div>` : "";
+    what = `<b>This /exec is still serving the old code — your v3.0 hasn't landed on it yet. It is returning version <code>${ver}</code>, not <code>3.0</code>.</b>
+      ${libHint}
       <ol style="margin:10px 0 0 18px;padding:0;line-height:1.75">
-        <li>In Apps Script, run <b>testCpvExtras</b> (select it ▸ Run ▸ Execution log). If it logs "cpvBreakdown OK", the code is fine — go to step 3.</li>
-        <li>In WebApp.gs, inside <code>doGet</code>, change the return line to wrap your payload variable:<br>
-            <code>return ContentService.createTextOutput(JSON.stringify(addCpvExtras(payload)))…</code><br>
-            (use your own variable name; this works even if it is a <code>const</code>). The line must run <i>before</i> the <code>return</code>, and before any cached copy is returned.</li>
-        <li><b>Deploy ▸ Manage deployments</b> ▸ pick the <b>${escHtml(currentMonthKey)}</b> deployment ▸ ✏️ Edit ▸ Version: <b>New version</b> ▸ Deploy. Saving the code is not enough, and "New deployment" makes a different link that this dashboard doesn't call.</li>
-        <li>If WebApp.gs caches the JSON (CacheService), clear it or wait for it to expire. Then hard-refresh this page (Ctrl+Shift+R).</li>
+        <li>In the project behind this /exec, open each <code>.gs</code> file in the sidebar. The one with <code>doGet</code> must have the v3.0 code I sent (first line of its header is <code>CPV DASHBOARD WEB APP  v3.0</code>). Delete any other <code>.gs</code> file that also defines <code>doGet</code> or <code>buildPayload_</code>.</li>
+        <li>Pick <b>testPayload</b> in the function dropdown ▸ Run. The <b>first line</b> of the Execution log must be <code>version: 3.0</code>. If it isn't, step 1 isn't done.</li>
+        <li><b>Deploy ▸ Manage deployments</b> ▸ find the row whose ID starts with <code>AKfycbxiq5XPEI6wn</code> ▸ <b>pencil ✏️ Edit</b> ▸ Version: <b>New version</b> ▸ <b>Deploy</b>. "New deployment" makes a different link, which this dashboard doesn't call.</li>
+        <li>Hard-refresh this page (Ctrl+Shift+R). The version line below should read <code>3.0</code>.</li>
       </ol>`;
   }
   return `<div style="background:var(--warn-soft);border:1px solid var(--warn);border-radius:10px;padding:20px;color:#5c3d00;margin-top:20px;line-height:1.6;font-size:13px">
