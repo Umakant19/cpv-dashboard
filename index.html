@@ -250,6 +250,8 @@ tbody tr:last-child td{border-bottom:0}
 .ai-loading{display:flex;align-items:center;gap:10px;color:var(--ink-3);font-size:13px;padding:16px}
 .ai-loading .spin{display:inline-block;width:16px;height:16px;border:2px solid var(--bg-3);border-top-color:var(--ss-amber);border-radius:50%;animation:spin .7s linear infinite}
 
+.w-lbl{font-size:9.5px;text-transform:uppercase;letter-spacing:.1em;color:var(--ink-4);font-weight:700;margin-bottom:4px}
+#w-team,#w-cat,#w-days,#w-vis,#w-dis,#fp-team,#fp-cat,#fp-vis,#fp-pay{padding:6px 10px;border:1.5px solid var(--line);border-radius:7px;background:#fff;font-size:12px;font-weight:600;font-family:inherit;color:var(--ink);cursor:pointer}
 /* ── CPV BREAKDOWN + SH COSTS ── */
 .bd-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-top:16px}
 .bd-tbl{font-size:12px}
@@ -321,6 +323,8 @@ tbody tr:last-child td{border-bottom:0}
         <button class="tab" data-tab="clustersh">Cluster SH Costs</button>
         <button class="tab" data-tab="pmadherence">PM Adherence</button>
         <button class="tab" data-tab="shoverall">SH - Overall</button>
+        <button class="tab" data-tab="watchlist">⚠ Watchlist</button>
+        <button class="tab" data-tab="fullpay">⚠ Full Pay · Low Visits</button>
       </div>
     </div>
     <div class="meta">
@@ -4095,7 +4099,274 @@ function redrawClusterSH2() {
   }));
 }
 
-const RENDER = { overview: renderOverview, quadrant: renderQuadrant, clusters: renderClusters, cpvbreakdown: renderCpvBreakdown, shdaily: renderSHDaily, deepdive: renderDeepDive, cityiq: renderCityIQ, clustersh: renderClusterSH, pmadherence: renderPMAdherence, shoverall: renderSHOverall };
+
+// ═════════════════════════════════════════════════════════════════════════════
+// WATCHLIST — B2C PM SHs who show up but don't do visits
+//   Attended days ≥ 20  ·  Total visits < 120  ·  Team B2C · Category PM  ·  DIS > 50
+// Thresholds editable at the top of the tab.
+// ═════════════════════════════════════════════════════════════════════════════
+let watchState = { minDays: 20, maxVisits: 120, minDis: 50, team: "B2C", category: "PM", sort: "vday", asc: true };
+
+function renderWatchlist() {
+  const sh  = DATA.shCosts || [];
+  const unified = DATA.shDailyUnified || [];
+  const daily = DATA.shDailyAll || [];
+  const haveLiveFeed = sh.length > 0;
+
+  // attended-days lookup (shDailyAll has .daysActive; fall back to counting non-zero days in shDailyUnified)
+  const dayIx = {};
+  daily.forEach(r => {
+    const k = (r.empCode || "").toString().toLowerCase() + "|" + String(r.name || "").toLowerCase();
+    dayIx[k] = { days: +r.daysActive || 0, total: +r.total || 0, pm: +r.pm || 0, cm: +r.cm || 0 };
+  });
+  unified.forEach(r => {
+    const k = (r.empCode || "").toString().toLowerCase() + "|" + String(r.name || "").toLowerCase();
+    if (dayIx[k]) return;
+    const anyDays = Array((DATA.meta.daysInMonth || 30)).fill(0);
+    Object.keys(r.typeDays || {}).forEach(t => (r.typeDays[t] || []).forEach((v, i) => { if (v > 0) anyDays[i] = 1; }));
+    const totByType = r.totByType || {};
+    dayIx[k] = { days: anyDays.reduce((s, v) => s + v, 0), total: r.total || 0, pm: totByType.PM || 0, cm: totByType.CM || 0 };
+  });
+
+  // base rows: use shCosts (team/category/DOJ) and join with attended days
+  const base = sh.map(r => {
+    const k = (r.empCode || "").toString().toLowerCase() + "|" + String(r.name || "").toLowerCase();
+    const d = dayIx[k] || { days: 0, total: +r.visits || 0, pm: +r.pm || 0, cm: +r.cm || 0 };
+    return Object.assign({}, r, {
+      daysPresent: d.days,
+      visitsAll: d.total || +r.visits || 0,
+      pmVisits: d.pm || +r.pm || 0,
+      cmVisits: d.cm || +r.cm || 0,
+      dis: systemDaysFromDoj(r.doj),
+      vday: d.days > 0 ? (d.total || +r.visits || 0) / d.days : null,
+    });
+  });
+
+  // apply filters
+  const S = watchState;
+  const list = base.filter(r =>
+    (!S.team     || r.team === S.team) &&
+    (!S.category || r.category === S.category) &&
+    (r.dis !== null && r.dis > S.minDis) &&
+    r.daysPresent >= S.minDays &&
+    r.visitsAll < S.maxVisits
+  );
+
+  // sort
+  const key = S.sort;
+  list.sort((a, b) => {
+    const va = a[key], vb = b[key];
+    if (typeof va === "string" || typeof vb === "string") return S.asc ? String(va||"").localeCompare(String(vb||"")) : String(vb||"").localeCompare(String(va||""));
+    const na = va === null || va === undefined, nb = vb === null || vb === undefined;
+    if (na && nb) return 0; if (na) return 1; if (nb) return -1;
+    return S.asc ? va - vb : vb - va;
+  });
+
+  const byCluster = {};
+  list.forEach(r => { const c = r.cluster || "—"; (byCluster[c] = byCluster[c] || []).push(r); });
+
+  const totalSHs = base.filter(r => (!S.team || r.team === S.team) && (!S.category || r.category === S.category)).length;
+
+  document.getElementById("app").innerHTML = `
+    <div class="section" style="margin-top:0">
+      <div class="eye">Watchlist · ${escHtml(DATA.meta.month || "")}</div>
+      <h2>Low-productivity SHs — present but not completing visits</h2>
+      <p class="lead">${S.team || "Any team"} · ${S.category || "any category"} SHs who have been in the system more than ${S.minDis} days, attended ${S.minDays}+ days this month, but did fewer than ${S.maxVisits} visits. ${haveLiveFeed ? "" : "<b>Needs shCosts feed (WebApp v3.0+).</b>"}</p>
+
+      <div class="filter-bar" style="display:flex;gap:14px;align-items:flex-end;margin-bottom:16px;flex-wrap:wrap;padding:14px 16px;background:var(--bg);border:1px solid var(--line);border-radius:10px">
+        <div><div class="w-lbl">Team</div><select id="w-team"><option value=""${S.team===""?" selected":""}>Any</option>${["B2C","B2B","Assure"].map(t=>`<option value="${t}"${S.team===t?" selected":""}>${t}</option>`).join("")}</select></div>
+        <div><div class="w-lbl">Category</div><select id="w-cat"><option value=""${S.category===""?" selected":""}>Any</option>${["PM","CM","Assure","CHS","CNI"].map(t=>`<option value="${t}"${S.category===t?" selected":""}>${t}</option>`).join("")}</select></div>
+        <div><div class="w-lbl">Attended ≥</div><input id="w-days" type="number" min="0" max="31" value="${S.minDays}" style="width:62px"></div>
+        <div><div class="w-lbl">Visits &lt;</div><input id="w-vis" type="number" min="0" max="500" value="${S.maxVisits}" style="width:72px"></div>
+        <div><div class="w-lbl">In system &gt; (days)</div><input id="w-dis" type="number" min="0" max="2000" value="${S.minDis}" style="width:72px"></div>
+        <div style="margin-left:auto;font-size:12px;color:var(--ink-3);font-family:'JetBrains Mono',monospace">${list.length} of ${totalSHs} ${S.team || "all"} ${S.category || ""} SHs match</div>
+      </div>
+
+      <div class="grid-4" style="margin-bottom:18px">
+        <div class="cost-tile"><div class="lbl">SHs on watchlist</div><div class="val">${list.length}</div><div class="pct">${totalSHs ? Math.round(list.length/totalSHs*100):0}% of ${S.team||"all"} ${S.category||""} SHs</div></div>
+        <div class="cost-tile"><div class="lbl">Total visits done</div><div class="val">${inr(list.reduce((s,r)=>s+r.visitsAll,0))}</div><div class="pct">by these SHs this month</div></div>
+        <div class="cost-tile"><div class="lbl">Avg visits / day</div><div class="val">${(() => { const a=list.filter(r=>r.vday!=null); return a.length ? (a.reduce((s,r)=>s+r.vday,0)/a.length).toFixed(1) : "—"; })()}</div><div class="pct">visits ÷ attended days</div></div>
+        <div class="cost-tile"><div class="lbl">Total cost of these SHs</div><div class="val">₹${inrShort(list.reduce((s,r)=>s+(+r.totalCost||0),0))}</div><div class="pct">salary+incentive+toolkit+reimb</div></div>
+      </div>
+
+      <div id="w-table"></div>
+    </div>`;
+
+  // bind filters
+  const refresh = () => renderWatchlist();
+  const bind = (id, k, cast) => { const el = document.getElementById(id); if (el) el.addEventListener("change", e => { watchState[k] = cast(e.target.value); refresh(); }); };
+  bind("w-team", "team", v=>v); bind("w-cat", "category", v=>v);
+  ["w-days","minDays"].length; // noop
+  document.getElementById("w-days").addEventListener("change", e => { watchState.minDays = +e.target.value||0; refresh(); });
+  document.getElementById("w-vis").addEventListener("change", e => { watchState.maxVisits = +e.target.value||0; refresh(); });
+  document.getElementById("w-dis").addEventListener("change", e => { watchState.minDis = +e.target.value||0; refresh(); });
+
+  if (!list.length) {
+    document.getElementById("w-table").innerHTML = '<div style="padding:30px;text-align:center;color:var(--good);font-size:14px;background:var(--good-soft);border-radius:10px"><b>✓ Nothing on the watchlist</b> — no ' + escHtml(S.team||"") + " " + escHtml(S.category||"") + " SHs match these thresholds.</div>";
+    return;
+  }
+
+  const cols = [
+    { k:"empCode",      l:"EMP Code", left:1, f:v=>`<span style="font-family:'JetBrains Mono',monospace;font-size:11px">${escHtml(v||"—")}</span>` },
+    { k:"name",         l:"SH Name",  left:1, f:v=>`<b>${escHtml(v)}</b>` },
+    { k:"cluster",      l:"Cluster",  left:1, f:v=>escHtml(v) },
+    { k:"doj",          l:"DOJ",      left:1, f:v=>`<span style="font-family:'JetBrains Mono',monospace;font-size:11px">${escHtml(v||"—")}</span>` },
+    { k:"dis",          l:"DIS",      f:v=>v===null?"—":inr(v) },
+    { k:"daysPresent",  l:"Days Present", f:v=>`<span style="font-weight:700;color:var(--ss-navy)">${v}</span>` },
+    { k:"visitsAll",    l:"Visits",   f:v=>`<span style="font-weight:700;color:${v<60?"var(--danger)":v<100?"var(--warn)":"var(--ink)"}">${inr(v)}</span>` },
+    { k:"pmVisits",     l:"PM",       f:v=>inr(v) },
+    { k:"cmVisits",     l:"CM",       f:v=>inr(v) },
+    { k:"vday",         l:"V/Day",    f:v=>v===null?"—":`<span style="font-weight:700;color:${v<3?"var(--danger)":v<5?"var(--warn)":"var(--good)"}">${v.toFixed(1)}</span>` },
+    { k:"totalCost",    l:"SH Cost",  f:v=>"₹"+inrShort(+v||0) },
+    { k:"cpv",          l:"CPV",      f:v=>v?"₹"+inr(v):"—" },
+  ];
+
+  const S2 = watchState;
+  const head = `<thead><tr>${cols.map(c=>`<th data-k="${c.k}" style="${c.left?"text-align:left;":""}cursor:pointer"${S2.sort===c.k?' class="sorted'+(S2.asc?" asc":"")+'"':""}>${c.l}</th>`).join("")}</tr></thead>`;
+  const clusterNames = Object.keys(byCluster).sort((a,b)=>byCluster[b].length-byCluster[a].length);
+  const html = clusterNames.map(cl => {
+    const rows = byCluster[cl];
+    const body = rows.map(r => `<tr>${cols.map(c=>`<td style="${c.left?"text-align:left;":""}">${c.f(r[c.k])}</td>`).join("")}</tr>`).join("");
+    const avgV = rows.reduce((s,r)=>s+r.visitsAll,0);
+    const avgD = rows.reduce((s,r)=>s+r.daysPresent,0);
+    return `<div style="margin-top:14px">
+        <div style="display:flex;align-items:baseline;gap:12px;margin-bottom:6px;flex-wrap:wrap">
+          <h3 style="margin:0;font-size:14px;color:var(--ss-navy)">${escHtml(cl)} <span style="color:var(--ink-3);font-weight:500">· ${rows.length} SH${rows.length===1?"":"s"}</span></h3>
+          <span style="margin-left:auto;font-size:11px;color:var(--ink-3);font-family:'JetBrains Mono',monospace">${inr(avgV)} visits across ${inr(avgD)} present-days · SOH: ${sohForCluster(cl)}</span>
+        </div>
+        <div class="tbl-wrap"><div style="overflow-x:auto"><table class="csh-tbl">${head}<tbody>${body}</tbody></table></div></div>
+      </div>`;
+  }).join("");
+
+  document.getElementById("w-table").innerHTML = html + `<p style="font-size:11px;color:var(--ink-3);margin-top:10px;line-height:1.6">Days Present = calendar days with ≥ 1 visit of any type (SH Daily All). Visits = all visit types. V/Day = visits ÷ days present. DIS = today − DOJ.</p>`;
+  document.querySelectorAll("#w-table th[data-k]").forEach(th => th.addEventListener("click", () => {
+    const k = th.dataset.k;
+    if (watchState.sort === k) watchState.asc = !watchState.asc;
+    else { watchState.sort = k; watchState.asc = ["empCode","name","cluster","doj"].includes(k); }
+    renderWatchlist();
+  }));
+}
+
+
+// ═════════════════════════════════════════════════════════════════════════════
+// FULL PAY · LOW VISITS — active B2C PM SHs who got (almost) full salary but
+// did few visits. "Full salary" = TotalBillable ≥ 95% of monthly CTC (default).
+// ═════════════════════════════════════════════════════════════════════════════
+let fpState = { team: "B2C", category: "PM", maxVisits: 50, minPaidRatio: 0.9, sort: "paidRatio", asc: false };
+
+function renderFullPay() {
+  const sh = DATA.shCosts || [];
+  if (!sh.length) {
+    document.getElementById("app").innerHTML = `<div class="section" style="margin-top:0"><div class="eye">Full pay · low visits</div><h2>Needs shCosts feed (WebApp v3.0+)</h2></div>`;
+    return;
+  }
+  const S = fpState;
+  const base = sh.map(r => {
+    const ctc = +r.ctcSalary || 0, sal = +r.salary || 0;
+    return Object.assign({}, r, {
+      dis: systemDaysFromDoj(r.doj),
+      paidRatio: ctc > 0 ? sal / ctc : null,
+      paidStatus: ctc > 0 ? (sal >= ctc * S.minPaidRatio ? "Full" : sal >= ctc * 0.5 ? "Partial" : "Minimal") : (sal > 0 ? "No CTC data" : "Unpaid"),
+    });
+  });
+  const list = base.filter(r =>
+    r.group === "active" &&
+    (!S.team || r.team === S.team) &&
+    (!S.category || r.category === S.category) &&
+    r.visits < S.maxVisits &&
+    r.paidRatio !== null && r.paidRatio >= S.minPaidRatio
+  );
+
+  const key = S.sort;
+  list.sort((a, b) => {
+    const va = a[key], vb = b[key];
+    if (typeof va === "string" || typeof vb === "string") return S.asc ? String(va||"").localeCompare(String(vb||"")) : String(vb||"").localeCompare(String(va||""));
+    const na = va === null || va === undefined, nb = vb === null || vb === undefined;
+    if (na && nb) return 0; if (na) return 1; if (nb) return -1;
+    return S.asc ? va - vb : vb - va;
+  });
+  const byCluster = {};
+  list.forEach(r => { const c = r.cluster || "—"; (byCluster[c] = byCluster[c] || []).push(r); });
+
+  const totalPool = base.filter(r => r.group === "active" && (!S.team || r.team === S.team) && (!S.category || r.category === S.category)).length;
+  const totalSalary = list.reduce((s, r) => s + (+r.salary || 0), 0);
+  const totalVisits = list.reduce((s, r) => s + (+r.visits || 0), 0);
+  const zeroVisit  = list.filter(r => r.visits === 0).length;
+
+  document.getElementById("app").innerHTML = `
+    <div class="section" style="margin-top:0">
+      <div class="eye">Full pay · low visits · ${escHtml(DATA.meta.month || "")}</div>
+      <h2>Getting paid, not delivering</h2>
+      <p class="lead">${S.team || "Any team"} · ${S.category || "any category"} · Active SHs whose salary paid is at least ${Math.round(S.minPaidRatio * 100)}% of monthly CTC, but who did fewer than ${S.maxVisits} visits. Ratio = (October Salary payout) ÷ (mastersheet "Salary" col U).</p>
+
+      <div class="filter-bar" style="display:flex;gap:14px;align-items:flex-end;margin-bottom:16px;flex-wrap:wrap;padding:14px 16px;background:var(--bg);border:1px solid var(--line);border-radius:10px">
+        <div><div class="w-lbl">Team</div><select id="fp-team"><option value=""${S.team===""?" selected":""}>Any</option>${["B2C","B2B","Assure"].map(t=>`<option value="${t}"${S.team===t?" selected":""}>${t}</option>`).join("")}</select></div>
+        <div><div class="w-lbl">Category</div><select id="fp-cat"><option value=""${S.category===""?" selected":""}>Any</option>${["PM","CM","Assure","CHS","CNI"].map(t=>`<option value="${t}"${S.category===t?" selected":""}>${t}</option>`).join("")}</select></div>
+        <div><div class="w-lbl">Visits &lt;</div><input id="fp-vis" type="number" min="0" max="500" value="${S.maxVisits}" style="width:72px"></div>
+        <div><div class="w-lbl">Paid ratio ≥ (%)</div><input id="fp-pay" type="number" min="0" max="200" value="${Math.round(S.minPaidRatio*100)}" style="width:72px"></div>
+        <div style="margin-left:auto;font-size:12px;color:var(--ink-3);font-family:'JetBrains Mono',monospace">${list.length} of ${totalPool} active ${S.team||"all"} ${S.category||""} SHs match</div>
+      </div>
+
+      <div class="grid-4" style="margin-bottom:18px">
+        <div class="cost-tile"><div class="lbl">SHs on this list</div><div class="val">${list.length}</div><div class="pct">${totalPool ? Math.round(list.length/totalPool*100):0}% of pool · ${zeroVisit} with 0 visits</div></div>
+        <div class="cost-tile"><div class="lbl">Salary paid to them</div><div class="val">₹${inrShort(totalSalary)}</div><div class="pct">for ${inr(totalVisits)} visits</div></div>
+        <div class="cost-tile"><div class="lbl">Avg paid ratio</div><div class="val">${(() => { const a=list.filter(r=>r.paidRatio!=null); return a.length ? Math.round(a.reduce((s,r)=>s+r.paidRatio,0)/a.length*100) + "%" : "—"; })()}</div><div class="pct">salary ÷ CTC</div></div>
+        <div class="cost-tile"><div class="lbl">Avg visits / SH</div><div class="val">${list.length ? (totalVisits/list.length).toFixed(1) : "—"}</div><div class="pct">against ${S.maxVisits} threshold</div></div>
+      </div>
+
+      <div id="fp-table"></div>
+    </div>`;
+
+  const ref = () => renderFullPay();
+  document.getElementById("fp-team").addEventListener("change", e => { fpState.team = e.target.value; ref(); });
+  document.getElementById("fp-cat").addEventListener("change", e => { fpState.category = e.target.value; ref(); });
+  document.getElementById("fp-vis").addEventListener("change", e => { fpState.maxVisits = +e.target.value||0; ref(); });
+  document.getElementById("fp-pay").addEventListener("change", e => { fpState.minPaidRatio = Math.max(0, (+e.target.value||0)/100); ref(); });
+
+  if (!list.length) {
+    document.getElementById("fp-table").innerHTML = '<div style="padding:30px;text-align:center;color:var(--good);font-size:14px;background:var(--good-soft);border-radius:10px"><b>✓ Nothing on this list</b> — no active ' + escHtml(S.team||"") + " " + escHtml(S.category||"") + " SHs match these thresholds.</div>";
+    return;
+  }
+
+  const cols = [
+    { k:"empCode",    l:"EMP Code", left:1, f:v=>`<span style="font-family:'JetBrains Mono',monospace;font-size:11px">${escHtml(v||"—")}</span>` },
+    { k:"name",       l:"SH Name",  left:1, f:v=>`<b>${escHtml(v)}</b>` },
+    { k:"cluster",    l:"Cluster",  left:1, f:v=>escHtml(v) },
+    { k:"doj",        l:"DOJ",      left:1, f:v=>`<span style="font-family:'JetBrains Mono',monospace;font-size:11px">${escHtml(v||"—")}</span>` },
+    { k:"dis",        l:"DIS",      f:v=>v===null?"—":inr(v) },
+    { k:"visits",     l:"Visits",   f:v=>`<span style="font-weight:700;color:${v===0?"var(--danger)":v<20?"var(--danger)":v<40?"var(--warn)":"var(--ink)"}">${inr(v)}</span>` },
+    { k:"pm",         l:"PM",       f:v=>inr(v) },
+    { k:"cm",         l:"CM",       f:v=>inr(v) },
+    { k:"salary",     l:"Salary (₹)",  f:v=>"₹"+inr(v||0) },
+    { k:"ctcSalary",  l:"CTC (₹)",     f:v=>(+v)>0?"₹"+inr(v):"—" },
+    { k:"paidRatio",  l:"Paid %",   f:v=>v===null?"—":`<span style="font-weight:700;color:${v>=1?"var(--danger)":v>=0.95?"var(--warn)":"var(--ink-2)"}">${Math.round(v*100)}%</span>` },
+    { k:"totalCost",  l:"Total Cost",  f:v=>"₹"+inrShort(+v||0) },
+    { k:"cpv",        l:"CPV",      f:v=>v?"₹"+inr(v):"—" },
+  ];
+
+  const head = `<thead><tr>${cols.map(c=>`<th data-k="${c.k}" style="${c.left?"text-align:left;":""}cursor:pointer"${S.sort===c.k?' class="sorted'+(S.asc?" asc":"")+'"':""}>${c.l}</th>`).join("")}</tr></thead>`;
+  const clusters = Object.keys(byCluster).sort((a,b)=>byCluster[b].length-byCluster[a].length);
+  document.getElementById("fp-table").innerHTML = clusters.map(cl => {
+    const rows = byCluster[cl];
+    const body = rows.map(r => `<tr>${cols.map(c=>`<td style="${c.left?"text-align:left;":""}">${c.f(r[c.k])}</td>`).join("")}</tr>`).join("");
+    const sumSal = rows.reduce((s,r)=>s+(+r.salary||0),0), sumVis = rows.reduce((s,r)=>s+(+r.visits||0),0);
+    return `<div style="margin-top:14px">
+        <div style="display:flex;align-items:baseline;gap:12px;margin-bottom:6px;flex-wrap:wrap">
+          <h3 style="margin:0;font-size:14px;color:var(--ss-navy)">${escHtml(cl)} <span style="color:var(--ink-3);font-weight:500">· ${rows.length} SH${rows.length===1?"":"s"}</span></h3>
+          <span style="margin-left:auto;font-size:11px;color:var(--ink-3);font-family:'JetBrains Mono',monospace">₹${inrShort(sumSal)} paid · ${inr(sumVis)} visits · SOH: ${sohForCluster(cl)}</span>
+        </div>
+        <div class="tbl-wrap"><div style="overflow-x:auto"><table class="csh-tbl">${head}<tbody>${body}</tbody></table></div></div>
+      </div>`;
+  }).join("") + `<p style="font-size:11px;color:var(--ink-3);margin-top:10px;line-height:1.6">Paid % = <b>Salary</b> (actually paid from October Salary tab) ÷ <b>CTC</b> (Salary col U in mastersheet, full month). ≥100% = full pay. SHs whose CTC isn't filled in the mastersheet don't show here because the ratio can't be computed.</p>`;
+  document.querySelectorAll("#fp-table th[data-k]").forEach(th => th.addEventListener("click", () => {
+    const k = th.dataset.k;
+    if (fpState.sort === k) fpState.asc = !fpState.asc;
+    else { fpState.sort = k; fpState.asc = ["empCode","name","cluster","doj"].includes(k); }
+    renderFullPay();
+  }));
+}
+
+const RENDER = { overview: renderOverview, quadrant: renderQuadrant, clusters: renderClusters, cpvbreakdown: renderCpvBreakdown, shdaily: renderSHDaily, deepdive: renderDeepDive, cityiq: renderCityIQ, clustersh: renderClusterSH, pmadherence: renderPMAdherence, shoverall: renderSHOverall, watchlist: renderWatchlist, fullpay: renderFullPay };
 let currentTab = "overview";
 
 function switchTab(name) {
