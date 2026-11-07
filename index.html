@@ -807,6 +807,35 @@ function applyCpvPmNet_(raw){
   }
   raw.__cpvPmNet = true;
 }
+
+// ★ v3.4 — Historical CPV lookup + Best-PM calculation
+// Return the historicalCPV object (not an index) — callers need .clusters and .months
+function histData() {
+  const H = (RAW && RAW.historicalCPV) || null;
+  return (H && H.clusters) ? H : null;
+}
+function histCluster(cluster) {
+  const H = histData(); if (!H) return null;
+  if (!H.__ix) { H.__ix = {}; H.clusters.forEach(c => { H.__ix[String(c.cluster).trim().toLowerCase()] = c; }); }
+  return H.__ix[String(cluster).trim().toLowerCase()] || null;
+}
+function bestPM(cluster) {
+  const H = histData(); if (!H) return null;
+  const c = histCluster(cluster); if (!c) return null;
+  let best = null;
+  (H.months || []).forEach(m => {
+    const v = c.byMonth && c.byMonth[m] && c.byMonth[m].pm;
+    if (typeof v === "number" && v > 0 && (best === null || v < best.pm)) best = { pm: v, month: m };
+  });
+  return best;
+}
+function historyRow(cluster, type) {
+  type = type || "pm";
+  const H = histData(); if (!H) return null;
+  const c = histCluster(cluster); if (!c) return null;
+  return (H.months || []).map(m => ({ month: m, value: (c.byMonth && c.byMonth[m] && c.byMonth[m][type]) || null }));
+}
+
 function applySohView(){ applyCpvPmNet_(RAW); applyExtras_(RAW); DATA = buildSohView(RAW, activeSoh); }
 
 // Reusable <option> list for any SOH selector; marks the active head selected.
@@ -2674,6 +2703,23 @@ function renderPMAdherence() {
     G.daysLeft    = _mp.remaining;      // real days remaining, from meta.asOf
     G.projClose = G.runRate > 0 ? G.balance / G.runRate : null;
     G.proj      = pmProjection(G.pmDue, G.pmDone);
+    // ★ v3.4 — SH planning + historical best
+    G.bufferSHSum    = list.reduce((s,c)=>s+(+c.bufferSH||0),0);
+    G.shRequiredSum  = list.reduce((s,c)=>s+(+c.shRequired||0),0);
+    G.loadPerSHAvg   = list.length ? list.reduce((s,c)=>s+(+c.loadPerSH||0),0)/list.length : 0;
+    G.clustersShort  = list.filter(c=>(+c.bufferSH||0) < 0).length;
+    G.clustersBuffer = list.filter(c=>(+c.bufferSH||0) > 0).length;
+    G.additionalSHReq= Math.max(0, -Math.round(list.reduce((s,c)=>s+Math.min(0,+c.bufferSH||0),0)));
+    // Best overall PM CPV month (lowest Total row in Historical CPV)
+    const H = (RAW && RAW.historicalCPV) || null;
+    G.bestOverallMonth = null; G.bestOverallCpv = null;
+    if (H && H.clusters) {
+      const tot = H.clusters.find(c=>/^total$/i.test(String(c.cluster).trim()));
+      if (tot) (H.months||[]).forEach(m => {
+        const v = tot.byMonth && tot.byMonth[m] && tot.byMonth[m].pm;
+        if (typeof v === "number" && v > 0 && (G.bestOverallCpv === null || v < G.bestOverallCpv)) { G.bestOverallCpv = v; G.bestOverallMonth = m; }
+      });
+    }
     G.nCities   = list.length;
     return G;
   }
@@ -2681,7 +2727,7 @@ function renderPMAdherence() {
 
   function pmaTopHtml(G) { return `
       <!-- Grand total hero strip -->
-      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:0;border-radius:12px;overflow:hidden;border:1px solid var(--line);margin-bottom:28px;box-shadow:0 2px 8px rgba(26,35,126,.07)">
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:0;border-radius:12px;overflow:hidden;border:1px solid var(--line);margin-bottom:28px;box-shadow:0 2px 8px rgba(26,35,126,.07)">
         <div style="padding:22px 24px;background:var(--ss-navy);border-right:1px solid rgba(255,255,255,.12)">
           <div style="font-size:10px;text-transform:uppercase;letter-spacing:.13em;color:var(--ss-amber);font-weight:700;margin-bottom:8px">PM Due (Total)</div>
           <div style="font-size:32px;font-weight:800;color:#fff;letter-spacing:-.02em">${inr(Math.round(G.pmDue))}</div>
@@ -2697,11 +2743,28 @@ function renderPMAdherence() {
           <div style="font-size:32px;font-weight:800;color:${G.balance>0?'var(--danger)':'var(--good)'};letter-spacing:-.02em">${inr(Math.round(G.balance))}</div>
           <div style="font-size:11px;color:var(--ink-3);margin-top:6px">tickets still open</div>
         </div>
-        <div style="padding:22px 24px;background:#fff">
+        <div style="padding:22px 24px;background:#fff;border-right:1px solid var(--line)">
           <div style="font-size:10px;text-transform:uppercase;letter-spacing:.13em;color:var(--ink-3);font-weight:700;margin-bottom:8px">Productive Run Rate</div>
           <div style="font-size:32px;font-weight:800;color:var(--ss-navy);letter-spacing:-.02em">${G.runRate.toFixed(1)}</div>
           <div style="font-size:11px;color:var(--ink-3);margin-top:6px">PM visits / SH-day</div>
         </div>
+        ${G.additionalSHReq > 0 ? `
+        <div style="padding:22px 24px;background:var(--danger-soft,#FEF2F2);border-right:1px solid var(--line)">
+          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.13em;color:var(--danger);font-weight:700;margin-bottom:8px">Additional SH Required</div>
+          <div style="font-size:32px;font-weight:800;color:var(--danger);letter-spacing:-.02em">+${G.additionalSHReq}</div>
+          <div style="font-size:11px;color:var(--ink-3);margin-top:6px">${G.clustersShort} short · ${G.clustersBuffer} with buffer</div>
+        </div>` : G.bufferSHSum > 0 ? `
+        <div style="padding:22px 24px;background:var(--good-soft,#ECFDF5);border-right:1px solid var(--line)">
+          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.13em;color:var(--good);font-weight:700;margin-bottom:8px">Buffer SH</div>
+          <div style="font-size:32px;font-weight:800;color:var(--good);letter-spacing:-.02em">+${G.bufferSHSum.toFixed(1)}</div>
+          <div style="font-size:11px;color:var(--ink-3);margin-top:6px">${G.clustersBuffer} clusters carry buffer</div>
+        </div>` : ""}
+        ${G.bestOverallMonth ? `
+        <div style="padding:22px 24px;background:var(--ss-sky);border-right:1px solid var(--line)">
+          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.13em;color:var(--ss-navy);font-weight:700;margin-bottom:8px">Best PM CPV so far</div>
+          <div style="font-size:32px;font-weight:800;color:var(--ss-navy);letter-spacing:-.02em">₹${inr(Math.round(G.bestOverallCpv))}</div>
+          <div style="font-size:11px;color:var(--ink-3);margin-top:6px">Overall Total · ${G.bestOverallMonth.replace(" (Restated)","")}</div>
+        </div>` : ""}
       </div>
 
       <!-- Secondary KPI tiles -->
@@ -2946,6 +3009,38 @@ function renderPMAdherence() {
             <div style="font-size:14px;font-weight:700;color:var(--ss-navy)">${nhcCpv>0?'₹'+inr(Math.round(nhcCpv)):'—'}</div>
             <div style="font-size:9px;color:var(--ink-4)">new-hire ₹/visit</div>
           </div>
+          ${(() => {
+            const b = +c.bufferSH;
+            if (!isFinite(b)) return "";
+            const need = b < 0;
+            const label = need ? "ADD SH Require" : "Buffer SH";
+            const color = need ? "var(--danger)" : "var(--good)";
+            const bg = need ? "var(--danger-soft,#FEF2F2)" : "var(--good-soft,#ECFDF5)";
+            return `<div style="background:${bg};border-radius:7px;padding:8px 10px;border:1px solid ${color}">
+              <div style="font-size:8.5px;text-transform:uppercase;letter-spacing:.1em;color:${color};font-weight:700">${label}</div>
+              <div style="font-size:14px;font-weight:700;color:${color}">${need ? "+" : ""}${Math.abs(b).toFixed(1)}</div>
+              <div style="font-size:9px;color:var(--ink-4)">SH gap vs required</div>
+            </div>`;
+          })()}
+          ${(() => {
+            const L = +c.loadPerSH;
+            if (!isFinite(L) || L === 0) return "";
+            return `<div style="background:var(--bg);border-radius:7px;padding:8px 10px">
+              <div style="font-size:8.5px;text-transform:uppercase;letter-spacing:.1em;color:var(--ink-4)">Load / SH</div>
+              <div style="font-size:14px;font-weight:700;color:var(--ss-navy)">${L.toFixed(0)}</div>
+              <div style="font-size:9px;color:var(--ink-4)">PM Due ÷ active SH</div>
+            </div>`;
+          })()}
+          ${(() => {
+            const bp = bestPM(c.cluster);
+            if (!bp) return "";
+            const isBest = cpvPM > 0 && bp.pm < cpvPM * 0.95;
+            return `<div style="background:var(--bg);border-radius:7px;padding:8px 10px;${isBest?'border:1px dashed var(--ss-amber)':''}">
+              <div style="font-size:8.5px;text-transform:uppercase;letter-spacing:.1em;color:var(--ink-4)">Best PM (Apr–now)</div>
+              <div style="font-size:14px;font-weight:700;color:var(--ss-navy)">₹${inr(Math.round(bp.pm))}</div>
+              <div style="font-size:9px;color:var(--ink-4)">in ${bp.month.replace(" (Restated)","")}</div>
+            </div>`;
+          })()}
         </div>
 
         <!-- month-end projection -->
@@ -3193,6 +3288,46 @@ function renderPMACluster(clusterName) {
         <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--ink-3);margin-bottom:14px">Visit breakdown — all types</div>
         <div style="display:flex;flex-direction:column;gap:10px">${visitBars}</div>
       </div>
+
+      ${(() => {
+        const hr = historyRow(clusterName, "pm"); if (!hr || !hr.length) return "";
+        const vals = hr.map(x => x.value).filter(v => typeof v === "number" && v > 0);
+        if (!vals.length) return "";
+        const bp = bestPM(clusterName);
+        const current = cpvPM > 0 ? cpvPM : null;
+        const vsBest = (current !== null && bp) ? (current - bp.pm) : null;
+        const min = Math.min(...vals, current || Infinity), max = Math.max(...vals, current || 0);
+        const range = Math.max(1, max - min);
+        const barCells = hr.map(x => {
+          if (x.value === null) return `<td style="text-align:center;padding:6px 10px;color:var(--ink-4)">—</td>`;
+          const h = Math.max(6, Math.round((x.value - min) / range * 44) + 4);
+          const isBest = bp && Math.round(x.value) === Math.round(bp.pm);
+          const col = isBest ? "var(--good)" : "var(--ss-navy)";
+          return `<td style="text-align:center;padding:4px 8px;vertical-align:bottom">
+            <div style="display:flex;flex-direction:column;align-items:center;gap:3px">
+              <div style="font-size:11px;font-weight:600;color:${col}">₹${inr(Math.round(x.value))}</div>
+              <div style="width:28px;height:${h}px;background:${col};border-radius:3px 3px 0 0;opacity:${isBest?1:0.7}"></div>
+              ${isBest?'<div style="font-size:9px;font-weight:700;color:var(--good)">BEST</div>':''}
+            </div></td>`;
+        }).join("");
+        const headCells = hr.map(x => `<td style="text-align:center;padding:4px 8px;font-size:9.5px;color:var(--ink-4);text-transform:uppercase;letter-spacing:.07em">${x.month.replace(" (Restated)","*")}</td>`).join("");
+        return `<div class="card" style="padding:20px 22px;margin-bottom:22px;border-left:4px solid var(--ss-amber)">
+          <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+            <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--ink-3)">Historical CPV · PM · ${clusterName}</div>
+            <div style="font-size:11px;color:var(--ink-3)">
+              ${bp ? `Best so far: <b style="color:var(--good)">₹${inr(Math.round(bp.pm))}</b> in ${bp.month.replace(" (Restated)","")}` : ""}
+              ${vsBest !== null ? ` · current is <b style="color:${vsBest > 0 ? 'var(--danger)' : 'var(--good)'}">${vsBest > 0 ? '+' : ''}₹${inr(Math.round(Math.abs(vsBest)))}</b> ${vsBest > 0 ? 'above' : 'below'} best` : ""}
+            </div>
+          </div>
+          <table style="width:100%;border-collapse:collapse">
+            <tbody>
+              <tr>${barCells}</tr>
+              <tr>${headCells}</tr>
+            </tbody>
+          </table>
+          <div style="margin-top:8px;font-size:10.5px;color:var(--ink-4)">All values from Historical CPV sheet · "*" = restated month</div>
+        </div>`;
+      })()}
 
       <!-- SH detail table -->
       <div class="tbl-wrap">
