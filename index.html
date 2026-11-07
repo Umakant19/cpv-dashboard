@@ -3814,7 +3814,6 @@ function renderBdTable() {
   const cols = [
     { k: "cluster", label: "Cluster" },
     { k: "visits",  label: "Visits<br>PM + MAAS", f: v => inr(v || 0) },
-    { k: "nhc",     label: "New Hiring Cost", f: v => inr(v || 0), grp: 1 },
     { k: "nhcCpv",  label: "New Hire CPV", f: fmtCpv, grp: 1 },
     { k: "cpv",     label: "CPV<br>– NHC + PM + Assure", f: fmtCpv, grp: 1, key: 1 },
     ...BD_PARTS.map(p => ({ k: p.k, label: p.label, f: fmtCpv, part: 1 })),
