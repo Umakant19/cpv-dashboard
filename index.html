@@ -829,6 +829,29 @@ function bestPM(cluster) {
   });
   return best;
 }
+// ★ v3.5 — previous month's CPV PM for a cluster (last non-empty month in Historical CPV)
+function prevMonthPM(cluster) {
+  const H = histData(); if (!H) return null;
+  const c = histCluster(cluster); if (!c) return null;
+  const ms = H.months || [];
+  for (let i = ms.length - 1; i >= 0; i--) {
+    const v = c.byMonth && c.byMonth[ms[i]] && c.byMonth[ms[i]].pm;
+    if (typeof v === "number" && v > 0) return { pm: v, month: ms[i] };
+  }
+  return null;
+}
+// Latest overall month + value from the Total row
+function prevMonthOverall() {
+  const H = histData(); if (!H) return null;
+  const tot = H.clusters.find(c => /^total$/i.test(String(c.cluster).trim()));
+  if (!tot) return null;
+  const ms = H.months || [];
+  for (let i = ms.length - 1; i >= 0; i--) {
+    const v = tot.byMonth && tot.byMonth[ms[i]] && tot.byMonth[ms[i]].pm;
+    if (typeof v === "number" && v > 0) return { pm: v, month: ms[i] };
+  }
+  return null;
+}
 function historyRow(cluster, type) {
   type = type || "pm";
   const H = histData(); if (!H) return null;
@@ -2765,6 +2788,17 @@ function renderPMAdherence() {
           <div style="font-size:32px;font-weight:800;color:var(--ss-navy);letter-spacing:-.02em">₹${inr(Math.round(G.bestOverallCpv))}</div>
           <div style="font-size:11px;color:var(--ink-3);margin-top:6px">Overall Total · ${G.bestOverallMonth.replace(" (Restated)","")}</div>
         </div>` : ""}
+        ${(() => {
+          const pv = prevMonthOverall(); if (!pv) return "";
+          const d = G.cpvPM > 0 ? G.cpvPM - pv.pm : null;
+          const col = d === null ? "var(--ink-3)" : d <= 0 ? "var(--good)" : "var(--danger)";
+          const bg  = d === null ? "var(--bg-2)" : d <= 0 ? "var(--good-soft,#ECFDF5)" : "var(--danger-soft,#FEF2F2)";
+          return `<div style="padding:22px 24px;background:${bg}">
+            <div style="font-size:10px;text-transform:uppercase;letter-spacing:.13em;color:${col};font-weight:700;margin-bottom:8px">Prev Month CPV PM</div>
+            <div style="font-size:32px;font-weight:800;color:${col};letter-spacing:-.02em">₹${inr(Math.round(pv.pm))}</div>
+            <div style="font-size:11px;color:var(--ink-3);margin-top:6px">${pv.month.replace(" (Restated)","")}${d !== null ? ` · current is <b style="color:${col}">${d <= 0 ? "↓" : "↑"} ₹${inr(Math.round(Math.abs(d)))}</b>` : ""}</div>
+          </div>`;
+        })()}
       </div>
 
       <!-- Secondary KPI tiles -->
@@ -3029,6 +3063,17 @@ function renderPMAdherence() {
               <div style="font-size:8.5px;text-transform:uppercase;letter-spacing:.1em;color:var(--ink-4)">Load / SH</div>
               <div style="font-size:14px;font-weight:700;color:var(--ss-navy)">${L.toFixed(0)}</div>
               <div style="font-size:9px;color:var(--ink-4)">PM Due ÷ active SH</div>
+            </div>`;
+          })()}
+          ${(() => {
+            const pv = prevMonthPM(c.cluster);
+            if (!pv) return "";
+            const delta = cpvPM > 0 ? cpvPM - pv.pm : null;
+            const col = delta === null ? "var(--ink-2)" : delta <= 0 ? "var(--good)" : "var(--danger)";
+            return `<div style="background:var(--bg);border-radius:7px;padding:8px 10px">
+              <div style="font-size:8.5px;text-transform:uppercase;letter-spacing:.1em;color:var(--ink-4)">Prev Month CPV</div>
+              <div style="font-size:14px;font-weight:700;color:var(--ss-navy)">₹${inr(Math.round(pv.pm))}</div>
+              <div style="font-size:9px;color:${col}">${delta === null ? pv.month.replace(" (Restated)","") : `${delta <= 0 ? "↓" : "↑"} ₹${inr(Math.round(Math.abs(delta)))} vs ${pv.month.replace(" (Restated)","")}`}</div>
             </div>`;
           })()}
           ${(() => {
